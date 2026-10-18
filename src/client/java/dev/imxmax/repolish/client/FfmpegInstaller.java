@@ -14,7 +14,7 @@ import java.util.zip.ZipInputStream;
 import net.fabricmc.loader.api.FabricLoader;
 
 public final class FfmpegInstaller {
-	private static final String WINDOWS_ZIP = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip";
+	private static final String WINDOWS_ZIP = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
 	private static volatile boolean started;
 
 	private FfmpegInstaller() {
@@ -38,7 +38,7 @@ public final class FfmpegInstaller {
 	}
 
 	public static void ensureAsync() {
-		if (ready() || started || !isWindows()) {
+		if (started || !isWindows() || hasLibx264()) {
 			return;
 		}
 		started = true;
@@ -77,6 +77,14 @@ public final class FfmpegInstaller {
 			} catch (IOException ignored) {
 			}
 		}
+	}
+
+	private static boolean hasLibx264() {
+		Path installed = installedBinary();
+		if (installed != null && "libx264".equals(FfmpegEncoder.videoEncoder(installed.toAbsolutePath().toString()))) {
+			return true;
+		}
+		return "libx264".equals(FfmpegEncoder.videoEncoder("ffmpeg"));
 	}
 
 	public static boolean isWindows() {

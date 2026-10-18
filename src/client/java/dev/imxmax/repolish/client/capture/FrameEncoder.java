@@ -6,6 +6,8 @@ import java.nio.file.Path;
 public interface FrameEncoder extends AutoCloseable {
 	void write(int[] abgr, int width, int height) throws IOException;
 
+	void repeatLast(int times) throws IOException;
+
 	@Override
 	void close() throws IOException;
 

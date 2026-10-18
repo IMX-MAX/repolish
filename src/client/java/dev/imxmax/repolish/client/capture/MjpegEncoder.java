@@ -8,6 +8,7 @@ import java.nio.file.Path;
 public final class MjpegEncoder implements FrameEncoder {
 	private final Path output;
 	private final MjpegAviWriter writer;
+	private byte[] lastJpeg;
 
 	public MjpegEncoder(Path output, int width, int height, int fps) throws IOException {
 		this.output = output;
@@ -16,7 +17,18 @@ public final class MjpegEncoder implements FrameEncoder {
 
 	@Override
 	public void write(int[] abgr, int width, int height) throws IOException {
-		this.writer.writeJpeg(JpegFrames.fromAbgr(abgr, width, height, 0.82F));
+		this.lastJpeg = JpegFrames.fromAbgr(abgr, width, height, 0.82F);
+		this.writer.writeJpeg(this.lastJpeg);
+	}
+
+	@Override
+	public void repeatLast(int times) throws IOException {
+		if (this.lastJpeg == null || times <= 0) {
+			return;
+		}
+		for (int i = 0; i < times; i++) {
+			this.writer.writeJpeg(this.lastJpeg);
+		}
 	}
 
 	@Override

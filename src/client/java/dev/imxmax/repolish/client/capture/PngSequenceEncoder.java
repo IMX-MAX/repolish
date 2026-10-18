@@ -8,6 +8,9 @@ import java.nio.file.Path;
 public final class PngSequenceEncoder implements FrameEncoder {
 	private final Path directory;
 	private int frame;
+	private int[] lastPixels;
+	private int lastWidth;
+	private int lastHeight;
 
 	public PngSequenceEncoder(Path directory) throws IOException {
 		this.directory = directory;
@@ -15,7 +18,20 @@ public final class PngSequenceEncoder implements FrameEncoder {
 	}
 
 	@Override
+	public void repeatLast(int times) throws IOException {
+		if (this.lastPixels == null || times <= 0) {
+			return;
+		}
+		for (int i = 0; i < times; i++) {
+			this.write(this.lastPixels, this.lastWidth, this.lastHeight);
+		}
+	}
+
+	@Override
 	public void write(int[] abgr, int width, int height) throws IOException {
+		this.lastPixels = abgr;
+		this.lastWidth = width;
+		this.lastHeight = height;
 		this.frame++;
 		try (NativeImage image = new NativeImage(width, height, false)) {
 			for (int y = 0; y < height; y++) {

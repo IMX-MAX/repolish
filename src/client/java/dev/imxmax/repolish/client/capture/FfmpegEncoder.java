@@ -1,6 +1,7 @@
 package dev.imxmax.repolish.client.capture;
 
 import dev.imxmax.repolish.Repolish;
+import dev.imxmax.repolish.capture.EncoderChoice;
 import dev.imxmax.repolish.capture.PixelPack;
 import dev.imxmax.repolish.client.FfmpegInstaller;
 import java.io.IOException;
@@ -9,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 public final class FfmpegEncoder implements FrameEncoder {
@@ -22,6 +24,10 @@ public final class FfmpegEncoder implements FrameEncoder {
 	private int width;
 	private int height;
 	private final StringBuilder errors = new StringBuilder();
+	private String encoderName;
+	private byte[] lastRgba;
+	private Thread drain;
+	private static final ConcurrentHashMap<String, String> ENCODERS = new ConcurrentHashMap<>();
 
 	public FfmpegEncoder(Path output, int fps, boolean wantAudio, String binary) {
 		this.output = output;
@@ -31,14 +37,38 @@ public final class FfmpegEncoder implements FrameEncoder {
 	}
 
 	public static String binary() {
-		Path installed = FfmpegInstaller.installedBinary();
-		if (installed != null && commandWorks(installed.toAbsolutePath().toString(), "-version")) {
-			return installed.toAbsolutePath().toString();
+		String installed = null;
+		String installedEncoder = null;
+		Path installedPath = FfmpegInstaller.installedBinary();
+		if (installedPath != null) {
+			installed = installedPath.toAbsolutePath().toString();
+			installedEncoder = videoEncoder(installed);
 		}
-		if (commandWorks("ffmpeg", "-version")) {
+		String pathEncoder = videoEncoder("ffmpeg");
+		if ("libx264".equals(pathEncoder) && !"libx264".equals(installedEncoder)) {
+			return "ffmpeg";
+		}
+		if (installedEncoder != null) {
+			return installed;
+		}
+		if (pathEncoder != null) {
 			return "ffmpeg";
 		}
 		return null;
+	}
+
+	public static String videoEncoder(String binary) {
+		String cached = ENCODERS.get(binary);
+		if (cached != null) {
+			return cached.isEmpty() ? null : cached;
+		}
+		String listing = commandOutput(binary, "-hide_banner", "-encoders");
+		if (listing == null) {
+			return null;
+		}
+		String chosen = EncoderChoice.choose(listing);
+		ENCODERS.put(binary, chosen == null ? "" : chosen);
+		return chosen;
 	}
 
 	public static boolean available() {
@@ -47,41 +77,90 @@ public final class FfmpegEncoder implements FrameEncoder {
 
 	@Override
 	public void write(int[] abgr, int width, int height) throws IOException {
-		if (this.process == null) {
+		byte[] rgba = PixelPack.abgrToRgba(abgr, width * height);
+		this.lastRgba = rgba;
+		writeBytes(rgba, width, height);
+	}
+
+	@Override
+	public void repeatLast(int times) throws IOException {
+		if (this.lastRgba == null || times <= 0) {
+			return;
+		}
+		for (int i = 0; i < times; i++) {
+			writeBytes(this.lastRgba, this.width, this.height);
+		}
+	}
+
+	private void writeBytes(byte[] rgba, int width, int height) throws IOException {
+		if (width != this.width || height != this.height) {
+			if (this.process != null) {
+				throw new IOException("Frame size changed from " + this.width + "x" + this.height + " to " + width + "x" + height);
+			}
 			this.width = width;
 			this.height = height;
-			this.audio = this.wantAudio && (FfmpegInstaller.isWindows() || monitorAvailable());
-			start();
 		}
-		if (width != this.width || height != this.height) {
-			throw new IOException("Frame size changed from " + this.width + "x" + this.height + " to " + width + "x" + height);
-		}
-		if (!this.process.isAlive()) {
-			if (this.audio) {
-				Repolish.LOGGER.warn("ffmpeg exited while opening game audio. Retrying video only. {}", this.errors);
-				this.audio = false;
-				start();
-			} else {
-				throw new IOException("ffmpeg exited. " + this.errors);
+		for (int attempt = 0; attempt < 3; attempt++) {
+			if (this.process == null || !this.process.isAlive()) {
+				if (this.process == null) {
+					this.audio = this.wantAudio && (FfmpegInstaller.isWindows() || monitorAvailable());
+					this.encoderName = videoEncoder(this.binary);
+					if (this.encoderName == null) {
+						throw new IOException("ffmpeg has no usable video encoder.");
+					}
+					start();
+				} else {
+					recoverOrThrow();
+				}
+			}
+			try {
+				this.stdin.write(rgba);
+				return;
+			} catch (IOException exception) {
+				if (attempt == 2) {
+					throw new IOException("ffmpeg exited. " + errorText(), exception);
+				}
+				recoverOrThrow();
 			}
 		}
-		this.stdin.write(PixelPack.abgrToRgba(abgr, width * height));
+	}
+
+	private void recoverOrThrow() throws IOException {
+		String stderr = errorText();
+		if (this.audio) {
+			Repolish.LOGGER.warn("ffmpeg exited while opening game audio. Retrying video only. {}", stderr);
+			this.audio = false;
+			start();
+			return;
+		}
+		if (!"mpeg4".equals(this.encoderName)) {
+			Repolish.LOGGER.warn("ffmpeg encoder {} failed. Retrying mpeg4. {}", this.encoderName, stderr);
+			this.encoderName = "mpeg4";
+			start();
+			return;
+		}
+		throw new IOException("ffmpeg exited. " + stderr);
 	}
 
 	@Override
 	public void close() throws IOException {
 		if (this.stdin != null) {
-			this.stdin.close();
+			try {
+				this.stdin.close();
+			} catch (IOException exception) {
+				Repolish.LOGGER.warn("ffmpeg pipe closed early", exception);
+			}
 			this.stdin = null;
 		}
 		if (this.process != null) {
 			try {
 				if (!this.process.waitFor(30, TimeUnit.SECONDS)) {
 					this.process.destroyForcibly();
-					throw new IOException("ffmpeg did not finish. " + this.errors);
+					throw new IOException("ffmpeg did not finish. " + errorText());
 				}
+				awaitErrors();
 				if (this.process.exitValue() != 0) {
-					throw new IOException("ffmpeg failed. " + this.errors);
+					throw new IOException("ffmpeg failed. " + errorText());
 				}
 			} catch (InterruptedException exception) {
 				Thread.currentThread().interrupt();
@@ -139,11 +218,16 @@ public final class FfmpegEncoder implements FrameEncoder {
 			command.add("192k");
 		}
 		command.add("-c:v");
-		command.add("libx264");
-		command.add("-preset");
-		command.add("veryfast");
-		command.add("-crf");
-		command.add("18");
+		command.add(this.encoderName);
+		if ("libx264".equals(this.encoderName)) {
+			command.add("-preset");
+			command.add("veryfast");
+			command.add("-crf");
+			command.add("18");
+		} else if ("mpeg4".equals(this.encoderName)) {
+			command.add("-q:v");
+			command.add("3");
+		}
 		command.add("-pix_fmt");
 		command.add("yuv420p");
 		command.add(this.output.toString());
@@ -151,9 +235,27 @@ public final class FfmpegEncoder implements FrameEncoder {
 		this.errors.setLength(0);
 		this.process = new ProcessBuilder(command).start();
 		this.stdin = this.process.getOutputStream();
-		Thread drain = new Thread(() -> drain(this.process), "repolish-ffmpeg");
-		drain.setDaemon(true);
-		drain.start();
+		this.drain = new Thread(() -> drain(this.process), "repolish-ffmpeg");
+		this.drain.setDaemon(true);
+		this.drain.start();
+	}
+
+	private void awaitErrors() {
+		if (this.drain == null) {
+			return;
+		}
+		try {
+			this.drain.join(1_000L);
+		} catch (InterruptedException exception) {
+			Thread.currentThread().interrupt();
+		}
+	}
+
+	private String errorText() {
+		awaitErrors();
+		synchronized (this.errors) {
+			return this.errors.toString().trim();
+		}
 	}
 
 	private void drain(Process process) {
@@ -187,15 +289,22 @@ public final class FfmpegEncoder implements FrameEncoder {
 	}
 
 	private static boolean commandWorks(String... command) {
+		return commandOutput(command) != null;
+	}
+
+	private static String commandOutput(String... command) {
 		try {
 			Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-			process.getInputStream().readAllBytes();
-			return process.waitFor(2, TimeUnit.SECONDS) && process.exitValue() == 0;
+			String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+			if (process.waitFor(5, TimeUnit.SECONDS) && process.exitValue() == 0) {
+				return output;
+			}
+			return null;
 		} catch (IOException | InterruptedException exception) {
 			if (exception instanceof InterruptedException) {
 				Thread.currentThread().interrupt();
 			}
-			return false;
+			return null;
 		}
 	}
 }
