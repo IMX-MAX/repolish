@@ -38,7 +38,7 @@ public final class FfmpegInstaller {
 	}
 
 	public static void ensureAsync() {
-		if (started || !isWindows() || hasLibx264()) {
+		if (started || !isWindows() || FfmpegEncoder.binary() != null) {
 			return;
 		}
 		started = true;
@@ -77,14 +77,6 @@ public final class FfmpegInstaller {
 			} catch (IOException ignored) {
 			}
 		}
-	}
-
-	private static boolean hasLibx264() {
-		Path installed = installedBinary();
-		if (installed != null && "libx264".equals(FfmpegEncoder.videoEncoder(installed.toAbsolutePath().toString()))) {
-			return true;
-		}
-		return "libx264".equals(FfmpegEncoder.videoEncoder("ffmpeg"));
 	}
 
 	public static boolean isWindows() {

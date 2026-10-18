@@ -17,7 +17,7 @@ public final class MjpegEncoder implements FrameEncoder {
 
 	@Override
 	public void write(int[] abgr, int width, int height) throws IOException {
-		this.lastJpeg = JpegFrames.fromAbgr(abgr, width, height, 0.82F);
+		this.lastJpeg = JpegFrames.fromAbgr(abgr, width, height, JpegFrames.CAPTURE_QUALITY);
 		this.writer.writeJpeg(this.lastJpeg);
 	}
 

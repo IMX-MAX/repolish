@@ -11,6 +11,8 @@ import javax.imageio.ImageWriter;
 import javax.imageio.stream.MemoryCacheImageOutputStream;
 
 public final class JpegFrames {
+	public static final float CAPTURE_QUALITY = 0.93F;
+
 	private JpegFrames() {
 	}
 

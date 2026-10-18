@@ -1,8 +1,7 @@
 package dev.imxmax.repolish.client.capture;
 
 import dev.imxmax.repolish.Repolish;
-import dev.imxmax.repolish.capture.EncoderChoice;
-import dev.imxmax.repolish.capture.PixelPack;
+import dev.imxmax.repolish.capture.JpegFrames;
 import dev.imxmax.repolish.client.FfmpegInstaller;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -10,7 +9,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 public final class FfmpegEncoder implements FrameEncoder {
@@ -24,10 +22,8 @@ public final class FfmpegEncoder implements FrameEncoder {
 	private int width;
 	private int height;
 	private final StringBuilder errors = new StringBuilder();
-	private String encoderName;
-	private byte[] lastRgba;
+	private byte[] lastJpeg;
 	private Thread drain;
-	private static final ConcurrentHashMap<String, String> ENCODERS = new ConcurrentHashMap<>();
 
 	public FfmpegEncoder(Path output, int fps, boolean wantAudio, String binary) {
 		this.output = output;
@@ -37,38 +33,14 @@ public final class FfmpegEncoder implements FrameEncoder {
 	}
 
 	public static String binary() {
-		String installed = null;
-		String installedEncoder = null;
-		Path installedPath = FfmpegInstaller.installedBinary();
-		if (installedPath != null) {
-			installed = installedPath.toAbsolutePath().toString();
-			installedEncoder = videoEncoder(installed);
+		Path installed = FfmpegInstaller.installedBinary();
+		if (installed != null && commandWorks(installed.toAbsolutePath().toString(), "-version")) {
+			return installed.toAbsolutePath().toString();
 		}
-		String pathEncoder = videoEncoder("ffmpeg");
-		if ("libx264".equals(pathEncoder) && !"libx264".equals(installedEncoder)) {
-			return "ffmpeg";
-		}
-		if (installedEncoder != null) {
-			return installed;
-		}
-		if (pathEncoder != null) {
+		if (commandWorks("ffmpeg", "-version")) {
 			return "ffmpeg";
 		}
 		return null;
-	}
-
-	public static String videoEncoder(String binary) {
-		String cached = ENCODERS.get(binary);
-		if (cached != null) {
-			return cached.isEmpty() ? null : cached;
-		}
-		String listing = commandOutput(binary, "-hide_banner", "-encoders");
-		if (listing == null) {
-			return null;
-		}
-		String chosen = EncoderChoice.choose(listing);
-		ENCODERS.put(binary, chosen == null ? "" : chosen);
-		return chosen;
 	}
 
 	public static boolean available() {
@@ -77,22 +49,21 @@ public final class FfmpegEncoder implements FrameEncoder {
 
 	@Override
 	public void write(int[] abgr, int width, int height) throws IOException {
-		byte[] rgba = PixelPack.abgrToRgba(abgr, width * height);
-		this.lastRgba = rgba;
-		writeBytes(rgba, width, height);
+		this.lastJpeg = JpegFrames.fromAbgr(abgr, width, height, JpegFrames.CAPTURE_QUALITY);
+		writeBytes(this.lastJpeg, width, height);
 	}
 
 	@Override
 	public void repeatLast(int times) throws IOException {
-		if (this.lastRgba == null || times <= 0) {
+		if (this.lastJpeg == null || times <= 0) {
 			return;
 		}
 		for (int i = 0; i < times; i++) {
-			writeBytes(this.lastRgba, this.width, this.height);
+			writeBytes(this.lastJpeg, this.width, this.height);
 		}
 	}
 
-	private void writeBytes(byte[] rgba, int width, int height) throws IOException {
+	private void writeBytes(byte[] jpeg, int width, int height) throws IOException {
 		if (width != this.width || height != this.height) {
 			if (this.process != null) {
 				throw new IOException("Frame size changed from " + this.width + "x" + this.height + " to " + width + "x" + height);
@@ -104,17 +75,13 @@ public final class FfmpegEncoder implements FrameEncoder {
 			if (this.process == null || !this.process.isAlive()) {
 				if (this.process == null) {
 					this.audio = this.wantAudio && (FfmpegInstaller.isWindows() || monitorAvailable());
-					this.encoderName = videoEncoder(this.binary);
-					if (this.encoderName == null) {
-						throw new IOException("ffmpeg has no usable video encoder.");
-					}
 					start();
 				} else {
 					recoverOrThrow();
 				}
 			}
 			try {
-				this.stdin.write(rgba);
+				this.stdin.write(jpeg);
 				return;
 			} catch (IOException exception) {
 				if (attempt == 2) {
@@ -128,14 +95,8 @@ public final class FfmpegEncoder implements FrameEncoder {
 	private void recoverOrThrow() throws IOException {
 		String stderr = errorText();
 		if (this.audio) {
-			Repolish.LOGGER.warn("ffmpeg exited while opening game audio. Retrying video only. {}", stderr);
+			Repolish.LOGGER.warn("ffmpeg exited while opening game audio. Saving the picture without audio. {}", stderr);
 			this.audio = false;
-			start();
-			return;
-		}
-		if (!"mpeg4".equals(this.encoderName)) {
-			Repolish.LOGGER.warn("ffmpeg encoder {} failed. Retrying mpeg4. {}", this.encoderName, stderr);
-			this.encoderName = "mpeg4";
 			start();
 			return;
 		}
@@ -189,12 +150,8 @@ public final class FfmpegEncoder implements FrameEncoder {
 		command.add("-loglevel");
 		command.add("error");
 		command.add("-f");
-		command.add("rawvideo");
-		command.add("-pix_fmt");
-		command.add("rgba");
-		command.add("-s");
-		command.add(this.width + "x" + this.height);
-		command.add("-r");
+		command.add("mjpeg");
+		command.add("-framerate");
 		command.add(Integer.toString(this.fps));
 		command.add("-i");
 		command.add("pipe:0");
@@ -212,24 +169,18 @@ public final class FfmpegEncoder implements FrameEncoder {
 				command.add("-i");
 				command.add(monitorName());
 			}
+			command.add("-map");
+			command.add("0:v:0");
+			command.add("-map");
+			command.add("1:a:0");
 			command.add("-c:a");
-			command.add("aac");
-			command.add("-b:a");
-			command.add("192k");
+			command.add("pcm_s16le");
+			command.add("-shortest");
+		} else {
+			command.add("-an");
 		}
 		command.add("-c:v");
-		command.add(this.encoderName);
-		if ("libx264".equals(this.encoderName)) {
-			command.add("-preset");
-			command.add("veryfast");
-			command.add("-crf");
-			command.add("18");
-		} else if ("mpeg4".equals(this.encoderName)) {
-			command.add("-q:v");
-			command.add("3");
-		}
-		command.add("-pix_fmt");
-		command.add("yuv420p");
+		command.add("copy");
 		command.add(this.output.toString());
 
 		this.errors.setLength(0);

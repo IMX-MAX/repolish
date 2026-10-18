@@ -3,9 +3,9 @@ package dev.imxmax.repolish.client;
 import dev.imxmax.repolish.Repolish;
 import dev.imxmax.repolish.capture.FrameScaler;
 import dev.imxmax.repolish.capture.PlaybackClock;
-import dev.imxmax.repolish.client.capture.FfmpegEncoder;
 import dev.imxmax.repolish.client.capture.FrameEncoder;
 import dev.imxmax.repolish.client.capture.MjpegEncoder;
+import dev.imxmax.repolish.client.capture.SpeakerCapture;
 import com.mojang.blaze3d.platform.NativeImage;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -156,7 +156,7 @@ public final class CaptureController {
 		if (FfmpegInstaller.isWindows()) {
 			FfmpegInstaller.ensureAsync();
 		}
-		if (this.wantAudio && FfmpegEncoder.binary() == null) {
+		if (this.wantAudio && SpeakerCapture.binary() == null) {
 			if (FfmpegInstaller.isWindows()) {
 				chat(minecraft, "Game audio needs ffmpeg. It is installing in the background, so this take is video only.");
 			} else {
@@ -221,6 +221,7 @@ public final class CaptureController {
 		Path output = null;
 		boolean audio = false;
 		List<String> markerSnapshot = List.of();
+		SpeakerCapture speakers = openSpeakers(minecraft);
 		try {
 			while (true) {
 				Frame frame = this.frames.poll(200, TimeUnit.MILLISECONDS);
@@ -242,8 +243,10 @@ public final class CaptureController {
 			if (this.encoder != null) {
 				output = this.encoder.output();
 				this.encoder.close();
-				audio = this.encoder.capturedAudio();
+				audio = speakers != null && speakers.finishAndMix(output);
 				writeMarkers(output, markerSnapshot);
+			} else if (speakers != null) {
+				speakers.finishAndMix(output);
 			}
 		} catch (Exception exception) {
 			error = exception.getMessage();
@@ -289,14 +292,29 @@ public final class CaptureController {
 		this.encoder.write(pixels, size.width(), size.height());
 	}
 
+	private SpeakerCapture openSpeakers(Minecraft minecraft) {
+		if (!this.wantAudio) {
+			return null;
+		}
+		String binary = SpeakerCapture.binary();
+		if (binary == null) {
+			return null;
+		}
+		try {
+			Path wav = minecraft.gameDirectory.toPath().resolve("repolish").resolve(sanitize(this.clipName) + "-" + this.generation + ".wav");
+			Files.createDirectories(wav.getParent());
+			SpeakerCapture speakers = new SpeakerCapture(binary, wav);
+			speakers.start();
+			return speakers;
+		} catch (IOException exception) {
+			Repolish.LOGGER.warn("Could not open the speakers. The picture will still be saved.", exception);
+			return null;
+		}
+	}
+
 	private FrameEncoder openEncoder(Minecraft minecraft, int width, int height) throws IOException {
 		Path directory = minecraft.gameDirectory.toPath().resolve("repolish");
-		String binary = FfmpegEncoder.binary();
-		String extension = binary != null ? ".mp4" : ".avi";
-		Path file = uniqueFile(directory, sanitize(this.clipName), extension);
-		if (binary != null) {
-			return new FfmpegEncoder(file, this.recordFps, this.wantAudio, binary);
-		}
+		Path file = uniqueFile(directory, sanitize(this.clipName), ".avi");
 		return new MjpegEncoder(file, width, height, this.recordFps);
 	}
 

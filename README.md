@@ -29,7 +29,7 @@ The export screen sets:
 - smoothing and responsiveness
 - HUD, game audio, and a shader pack when Iris is installed
 
-Videos are written to `repolish/` in the game directory and show up under Recordings on the main menu. Repolish saves an AVI on its own. If ffmpeg is available, it saves an mp4 instead and can include game audio from the speakers. The video keeps real time even when a frame is captured late. On Windows, a missing ffmpeg is downloaded in the background for the next take. The game window stays where it is. A resolution preset only scales the video down. Markers are saved next to the file as `.markers.txt`.
+Videos are written to `repolish/` in the game directory and show up under Recordings on the main menu. The picture is always the same high-quality JPEG capture, saved as an AVI. ffmpeg does not recompress it. When ffmpeg is available and game audio is enabled, that audio is added beside the original picture. The video keeps real time even when a frame is captured late. On Windows, a missing ffmpeg is downloaded in the background for a later take. The game window stays where it is. A resolution preset only scales the video down. Markers are saved next to the file as `.markers.txt`.
 
 Changing FOV or shaders applies to the next recording. Run the TAS again to export another take.
 
