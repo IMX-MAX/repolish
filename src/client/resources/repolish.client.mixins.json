@@ -3,7 +3,9 @@
 	"package": "dev.imxmax.repolish.client.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"client": [
-		"RepolishClientMixin"
+		"CameraMixin",
+		"GameRendererMixin",
+		"PauseScreenMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

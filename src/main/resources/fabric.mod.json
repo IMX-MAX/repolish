@@ -22,7 +22,6 @@
 		]
 	},
 	"mixins": [
-		"repolish.mixins.json",
 		{
 			"config": "repolish.client.mixins.json",
 			"environment": "client"
