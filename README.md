@@ -18,7 +18,10 @@ Fabric client mod for Minecraft Java Edition **1.21.11**. Repolish records first
      - Drag **Smoothing**, **Responsiveness**, **Custom FOV**, toggle **HUD**, or switch **Iris Shader Packs** and watch the 3D first-person viewport update immediately.
 3. **Deterministic Video Export**:
    - Click **Export video** in the editor to step through `[In .. Out]` deterministically frame-by-frame at `30`, `60`, or `120` fps.
-   - Even with heavy shaders enabled, every frame is rendered at its exact `1 / fps` timestamp and encoded to `.mp4` (`libx264 -preset slow -crf 14` with trimmed speaker audio) or high-quality `.avi`.
+   - Export settings are **frozen at the moment you click Export**: the video is rendered with the smoothing, responsiveness, FOV, HUD, audio, resolution, and FPS you configured — not whatever the live preview happens to show later.
+   - Frames stream **directly into ffmpeg while rendering** (no giant intermediate file), so the encode finishes moments after the last frame. Output is `.mp4` (`libx264 -crf 14` with trimmed speaker audio), scaled with lanczos to your **exact chosen resolution** (even above window size), or high-quality `.avi` when ffmpeg is unavailable.
+   - The recreation renders with the **FOV the take was recorded with**, and the replayed player is velocity-zeroed and server-synced every frame so the footage never rubber-bands or bounces.
+   - Even with heavy shaders enabled, every frame is rendered at its exact `1 / fps` timestamp.
 
 ## Controls
 
