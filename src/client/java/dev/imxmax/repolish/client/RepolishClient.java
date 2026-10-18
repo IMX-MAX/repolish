@@ -21,7 +21,14 @@ public class RepolishClient implements ClientModInitializer {
 			if (minecraft.player == null) {
 				return;
 			}
-			if (CaptureController.isRecording() || !ExportSettings.get().preview) {
+			if (CaptureController.isRecording()) {
+				return;
+			}
+			if (CaptureController.isRendering()) {
+				graphics.drawString(minecraft.font, Component.translatable("repolish.hud.rendering", CaptureController.renderPercent()), 6, 6, 0xFFE7C36A);
+				return;
+			}
+			if (!ExportSettings.get().preview) {
 				return;
 			}
 			graphics.drawString(minecraft.font, Component.translatable("repolish.hud.preview"), 6, 6, 0xFFE7C36A);

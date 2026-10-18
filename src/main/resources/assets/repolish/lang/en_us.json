@@ -30,6 +30,7 @@
 	"repolish.recordings.delete": "Delete this recording?",
 	"repolish.hint": "Press Esc and click Stop recording to finish a take. Recordings are also listed from the main menu. Smoothing takes the shake out of a TAS look. Responsiveness keeps flicks on the action instead of trailing like the spectator camera.",
 	"repolish.hud.preview": "Repolish preview",
+	"repolish.hud.rendering": "Repolish rendering %s%%",
 	"repolish.chat.preview_on": "Camera polish preview on.",
 	"repolish.chat.preview_off": "Camera polish preview off.",
 	"repolish.chat.marker": "Marker %s placed.",

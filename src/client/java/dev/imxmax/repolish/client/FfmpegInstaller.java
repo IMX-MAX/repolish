@@ -2,6 +2,7 @@ package dev.imxmax.repolish.client;
 
 import dev.imxmax.repolish.Repolish;
 import dev.imxmax.repolish.client.capture.FfmpegEncoder;
+import dev.imxmax.repolish.client.capture.OfflineRenderer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -38,7 +39,7 @@ public final class FfmpegInstaller {
 	}
 
 	public static void ensureAsync() {
-		if (started || !isWindows() || FfmpegEncoder.binary() != null) {
+		if (started || !isWindows() || hasLibx264()) {
 			return;
 		}
 		started = true;
@@ -77,6 +78,14 @@ public final class FfmpegInstaller {
 			} catch (IOException ignored) {
 			}
 		}
+	}
+
+	private static boolean hasLibx264() {
+		Path installed = installedBinary();
+		if (installed != null && "libx264".equals(OfflineRenderer.videoEncoder(installed.toAbsolutePath().toString()))) {
+			return true;
+		}
+		return "libx264".equals(OfflineRenderer.videoEncoder("ffmpeg"));
 	}
 
 	public static boolean isWindows() {

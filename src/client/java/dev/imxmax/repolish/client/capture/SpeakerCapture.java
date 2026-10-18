@@ -33,6 +33,35 @@ public final class SpeakerCapture {
 		drain.start();
 	}
 
+	public boolean finish() {
+		Process running = this.process;
+		if (running == null) {
+			return false;
+		}
+		try {
+			running.getOutputStream().write('q');
+			running.getOutputStream().flush();
+			running.getOutputStream().close();
+		} catch (IOException exception) {
+			running.destroy();
+		}
+		try {
+			if (!running.waitFor(8, TimeUnit.SECONDS)) {
+				running.destroyForcibly();
+				running.waitFor(2, TimeUnit.SECONDS);
+			}
+		} catch (InterruptedException exception) {
+			Thread.currentThread().interrupt();
+			running.destroyForcibly();
+			return false;
+		}
+		return Files.exists(this.wav);
+	}
+
+	public Path wav() {
+		return this.wav;
+	}
+
 	public boolean finishAndMix(Path video) {
 		Process running = this.process;
 		if (running == null) {
