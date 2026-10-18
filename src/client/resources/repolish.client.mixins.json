@@ -5,7 +5,8 @@
 	"client": [
 		"CameraMixin",
 		"GameRendererMixin",
-		"PauseScreenMixin"
+		"PauseScreenMixin",
+		"TitleScreenMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

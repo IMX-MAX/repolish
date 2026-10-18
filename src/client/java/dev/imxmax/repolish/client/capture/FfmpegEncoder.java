@@ -2,6 +2,7 @@ package dev.imxmax.repolish.client.capture;
 
 import dev.imxmax.repolish.Repolish;
 import dev.imxmax.repolish.capture.PixelPack;
+import dev.imxmax.repolish.client.FfmpegInstaller;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -14,6 +15,7 @@ public final class FfmpegEncoder implements FrameEncoder {
 	private final Path output;
 	private final int fps;
 	private final boolean wantAudio;
+	private final String binary;
 	private Process process;
 	private OutputStream stdin;
 	private boolean audio;
@@ -21,14 +23,26 @@ public final class FfmpegEncoder implements FrameEncoder {
 	private int height;
 	private final StringBuilder errors = new StringBuilder();
 
-	public FfmpegEncoder(Path output, int fps, boolean wantAudio) {
+	public FfmpegEncoder(Path output, int fps, boolean wantAudio, String binary) {
 		this.output = output;
 		this.fps = fps;
 		this.wantAudio = wantAudio;
+		this.binary = binary;
+	}
+
+	public static String binary() {
+		Path installed = FfmpegInstaller.installedBinary();
+		if (installed != null && commandWorks(installed.toAbsolutePath().toString(), "-version")) {
+			return installed.toAbsolutePath().toString();
+		}
+		if (commandWorks("ffmpeg", "-version")) {
+			return "ffmpeg";
+		}
+		return null;
 	}
 
 	public static boolean available() {
-		return commandWorks("ffmpeg", "-version");
+		return binary() != null;
 	}
 
 	@Override
@@ -36,7 +50,7 @@ public final class FfmpegEncoder implements FrameEncoder {
 		if (this.process == null) {
 			this.width = width;
 			this.height = height;
-			this.audio = this.wantAudio && monitorAvailable();
+			this.audio = this.wantAudio && (FfmpegInstaller.isWindows() || monitorAvailable());
 			start();
 		}
 		if (width != this.width || height != this.height) {
@@ -91,7 +105,7 @@ public final class FfmpegEncoder implements FrameEncoder {
 			this.process.destroyForcibly();
 		}
 		List<String> command = new ArrayList<>();
-		command.add("ffmpeg");
+		command.add(this.binary);
 		command.add("-y");
 		command.add("-loglevel");
 		command.add("error");
@@ -106,10 +120,19 @@ public final class FfmpegEncoder implements FrameEncoder {
 		command.add("-i");
 		command.add("pipe:0");
 		if (this.audio) {
-			command.add("-f");
-			command.add("pulse");
-			command.add("-i");
-			command.add(monitorName());
+			if (FfmpegInstaller.isWindows()) {
+				command.add("-f");
+				command.add("wasapi");
+				command.add("-loopback");
+				command.add("1");
+				command.add("-i");
+				command.add("default");
+			} else {
+				command.add("-f");
+				command.add("pulse");
+				command.add("-i");
+				command.add(monitorName());
+			}
 			command.add("-c:a");
 			command.add("aac");
 			command.add("-b:a");

@@ -1,9 +1,10 @@
 package dev.imxmax.repolish.client;
 
 import dev.imxmax.repolish.Repolish;
+import dev.imxmax.repolish.capture.FrameScaler;
 import dev.imxmax.repolish.client.capture.FfmpegEncoder;
 import dev.imxmax.repolish.client.capture.FrameEncoder;
-import dev.imxmax.repolish.client.capture.PngSequenceEncoder;
+import dev.imxmax.repolish.client.capture.MjpegEncoder;
 import com.mojang.blaze3d.platform.NativeImage;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -11,6 +12,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.network.chat.Component;
@@ -18,18 +21,22 @@ import net.minecraft.network.chat.Component;
 public final class CaptureController {
 	private static final CaptureController INSTANCE = new CaptureController();
 
-	private boolean recording;
+	private final ArrayBlockingQueue<Frame> frames = new ArrayBlockingQueue<>(3);
+	private final List<String> markers = new ArrayList<>();
+
+	private volatile boolean recording;
+	private volatile boolean finish;
+	private volatile Thread worker;
 	private int generation;
 	private boolean capturePending;
-	private int resizeWaits;
 	private long nextFrameNanos;
 	private long startedNanos;
 	private boolean previousHideGui;
-	private boolean resizedWindow;
-	private int previousWidth;
-	private int previousHeight;
 	private FrameEncoder encoder;
-	private final List<String> markers = new ArrayList<>();
+	private int recordFps = 60;
+	private boolean wantAudio;
+	private String clipName = "clip";
+	private ExportSettings.Resolution resolution = ExportSettings.Resolution.WINDOW;
 
 	private CaptureController() {
 	}
@@ -38,9 +45,14 @@ public final class CaptureController {
 		return INSTANCE.recording;
 	}
 
+	public static String elapsed() {
+		long seconds = Math.max(0L, (System.nanoTime() - INSTANCE.startedNanos) / 1_000_000_000L);
+		return seconds / 60 + ":" + String.format(Locale.ROOT, "%02d", seconds % 60);
+	}
+
 	public static void toggle(Minecraft minecraft) {
 		if (INSTANCE.recording) {
-			INSTANCE.stop(minecraft, null);
+			INSTANCE.stop(minecraft);
 		} else {
 			INSTANCE.start(minecraft);
 		}
@@ -48,6 +60,21 @@ public final class CaptureController {
 
 	public static void startRecording(Minecraft minecraft) {
 		INSTANCE.start(minecraft);
+	}
+
+	public static void shutdown(Minecraft minecraft) {
+		if (!INSTANCE.recording) {
+			return;
+		}
+		INSTANCE.stop(minecraft);
+		Thread thread = INSTANCE.worker;
+		if (thread != null) {
+			try {
+				thread.join(8_000L);
+			} catch (InterruptedException exception) {
+				Thread.currentThread().interrupt();
+			}
+		}
 	}
 
 	public static void toggleHud(Minecraft minecraft) {
@@ -65,11 +92,15 @@ public final class CaptureController {
 			return;
 		}
 		double seconds = (System.nanoTime() - INSTANCE.startedNanos) / 1_000_000_000.0;
-		INSTANCE.markers.add(String.format(Locale.ROOT, "%.3f", seconds));
+		synchronized (INSTANCE.markers) {
+			INSTANCE.markers.add(String.format(Locale.ROOT, "%.3f", seconds));
+		}
 	}
 
 	public static int markerCount() {
-		return INSTANCE.markers.size();
+		synchronized (INSTANCE.markers) {
+			return INSTANCE.markers.size();
+		}
 	}
 
 	public static void onFrame(Minecraft minecraft) {
@@ -78,6 +109,11 @@ public final class CaptureController {
 
 	public void start(Minecraft minecraft) {
 		if (this.recording) {
+			return;
+		}
+		Thread existing = this.worker;
+		if (existing != null && existing.isAlive()) {
+			chat(minecraft, "Still saving the last recording.");
 			return;
 		}
 		if (minecraft.level == null || minecraft.player == null) {
@@ -92,111 +128,80 @@ public final class CaptureController {
 		if (!settings.includeHud) {
 			minecraft.options.hideGui = true;
 		}
-		this.resizedWindow = false;
-		if (settings.resolution.width() > 0) {
-			this.previousWidth = minecraft.getWindow().getScreenWidth();
-			this.previousHeight = minecraft.getWindow().getScreenHeight();
-			this.resizedWindow = true;
-			minecraft.getWindow().setWindowed(settings.resolution.width(), settings.resolution.height());
-			minecraft.resizeDisplay();
+		this.recordFps = settings.fps;
+		this.wantAudio = settings.includeAudio;
+		this.clipName = settings.clipName;
+		this.resolution = settings.resolution == null ? ExportSettings.Resolution.WINDOW : settings.resolution;
+		this.frames.clear();
+		synchronized (this.markers) {
+			this.markers.clear();
 		}
-
 		this.generation++;
 		this.capturePending = false;
-		this.resizeWaits = 0;
+		this.finish = false;
 		this.encoder = null;
-		this.markers.clear();
 		this.startedNanos = System.nanoTime();
 		this.nextFrameNanos = this.startedNanos;
 		this.recording = true;
-		chat(minecraft, "Recording. Press the record key again to stop.");
+		Thread thread = new Thread(() -> this.encodeLoop(minecraft), "repolish-encode");
+		thread.setDaemon(true);
+		this.worker = thread;
+		thread.start();
+
+		String key = RepolishKeybinds.record.getTranslatedKeyMessage().getString();
+		chat(minecraft, "Recording. Press " + key + " to stop, or press Esc and click Stop recording.");
+		if (this.wantAudio && FfmpegEncoder.binary() == null) {
+			FfmpegInstaller.ensureAsync();
+			if (FfmpegInstaller.isWindows()) {
+				chat(minecraft, "Game audio needs ffmpeg. It is installing in the background, so this take is video only.");
+			} else {
+				chat(minecraft, "Game audio needs ffmpeg installed. This take is video only.");
+			}
+		}
 	}
 
-	public void stop(Minecraft minecraft, String error) {
-		if (!this.recording && this.encoder == null) {
+	public void stop(Minecraft minecraft) {
+		if (!this.recording) {
 			return;
 		}
 		this.recording = false;
+		this.finish = true;
 		this.generation++;
 		this.capturePending = false;
 		minecraft.options.hideGui = this.previousHideGui;
-		if (this.resizedWindow) {
-			minecraft.getWindow().setWindowed(this.previousWidth, this.previousHeight);
-			minecraft.resizeDisplay();
-			this.resizedWindow = false;
-		}
-
-		FrameEncoder finished = this.encoder;
-		this.encoder = null;
-		Path output = null;
-		boolean audio = false;
-		String closeError = null;
-		if (finished != null) {
-			output = finished.output();
-			try {
-				finished.close();
-				audio = finished.capturedAudio();
-			} catch (IOException exception) {
-				closeError = exception.getMessage();
-				Repolish.LOGGER.error("Could not finish the Repolish export", exception);
-			}
-			writeMarkers(output);
-		}
-		if (error != null) {
-			chat(minecraft, error);
-		} else if (closeError != null) {
-			chat(minecraft, "Export failed. " + closeError);
-		} else if (output != null) {
-			String audioNote = audio ? "Game audio is included." : "Video only. Install ffmpeg and PulseAudio or PipeWire to capture game audio.";
-			chat(minecraft, "Saved " + output + ". " + audioNote);
-		} else {
-			chat(minecraft, "Recording stopped before a frame was captured.");
-		}
 	}
 
 	private void captureFrame(Minecraft minecraft) {
-		if (!this.recording || minecraft.level == null) {
+		if (!this.recording || minecraft.level == null || this.frames.remainingCapacity() == 0) {
 			return;
 		}
 		long now = System.nanoTime();
-		long interval = 1_000_000_000L / ExportSettings.get().fps;
+		long interval = 1_000_000_000L / this.recordFps;
 		if (now < this.nextFrameNanos || this.capturePending) {
 			return;
 		}
 		this.nextFrameNanos = now + interval;
 		int request = this.generation;
-		ExportSettings.Resolution resolution = ExportSettings.get().resolution;
 		this.capturePending = true;
 		try {
-			Screenshot.takeScreenshot(minecraft.getMainRenderTarget(), image -> acceptFrame(minecraft, request, resolution, image));
+			Screenshot.takeScreenshot(minecraft.getMainRenderTarget(), image -> acceptFrame(request, image));
 		} catch (RuntimeException exception) {
 			this.capturePending = false;
 			Repolish.LOGGER.error("Could not read the framebuffer", exception);
-			this.stop(minecraft, "Could not read the framebuffer.");
+			this.stop(minecraft);
+			minecraft.execute(() -> chat(minecraft, "Could not read the framebuffer."));
 		}
 	}
 
-	private void acceptFrame(Minecraft minecraft, int request, ExportSettings.Resolution resolution, NativeImage image) {
+	private void acceptFrame(int request, NativeImage image) {
 		try {
 			if (request != this.generation || !this.recording) {
 				return;
 			}
 			int width = image.getWidth();
 			int height = image.getHeight();
-			if (resolution.width() > 0 && (width != resolution.width() || height != resolution.height()) && this.resizeWaits < 45) {
-				this.resizeWaits++;
-				return;
-			}
-			int[] pixels = image.getPixelsABGR();
-			int[] copy = new int[width * height];
-			System.arraycopy(pixels, 0, copy, 0, copy.length);
-			if (this.encoder == null) {
-				this.encoder = openEncoder(minecraft, width, height);
-			}
-			this.encoder.write(copy, width, height);
-		} catch (IOException | RuntimeException exception) {
-			Repolish.LOGGER.error("Frame capture failed", exception);
-			this.stop(minecraft, "Frame capture failed. " + exception.getMessage());
+			int[] copy = java.util.Arrays.copyOf(image.getPixelsABGR(), width * height);
+			this.frames.offer(new Frame(copy, width, height));
 		} finally {
 			image.close();
 			if (request == this.generation) {
@@ -205,27 +210,117 @@ public final class CaptureController {
 		}
 	}
 
-	private FrameEncoder openEncoder(Minecraft minecraft, int width, int height) throws IOException {
-		Path directory = minecraft.gameDirectory.toPath().resolve("repolish");
-		Files.createDirectories(directory);
-		String name = sanitize(ExportSettings.get().clipName);
-		if (FfmpegEncoder.available()) {
-			return new FfmpegEncoder(directory.resolve(name + ".mp4"), ExportSettings.get().fps, ExportSettings.get().includeAudio);
+	private void encodeLoop(Minecraft minecraft) {
+		String error = null;
+		Path output = null;
+		boolean audio = false;
+		List<String> markerSnapshot = List.of();
+		try {
+			while (true) {
+				Frame frame = this.frames.poll(200, TimeUnit.MILLISECONDS);
+				if (frame != null) {
+					this.writeFrame(minecraft, frame);
+					continue;
+				}
+				if (this.finish) {
+					break;
+				}
+			}
+			Frame leftover;
+			while ((leftover = this.frames.poll()) != null) {
+				this.writeFrame(minecraft, leftover);
+			}
+			synchronized (this.markers) {
+				markerSnapshot = List.copyOf(this.markers);
+			}
+			if (this.encoder != null) {
+				output = this.encoder.output();
+				this.encoder.close();
+				audio = this.encoder.capturedAudio();
+				writeMarkers(output, markerSnapshot);
+			}
+		} catch (Exception exception) {
+			error = exception.getMessage();
+			Repolish.LOGGER.error("Frame capture failed", exception);
+			if (this.encoder != null) {
+				output = this.encoder.output();
+				try {
+					this.encoder.close();
+				} catch (IOException closeError) {
+					Repolish.LOGGER.warn("Could not close the partial recording", closeError);
+				}
+			}
+		} finally {
+			this.encoder = null;
+			this.finish = false;
+			if (this.worker == Thread.currentThread()) {
+				this.worker = null;
+			}
+			Path saved = output;
+			String failure = error;
+			boolean heard = audio;
+			minecraft.execute(() -> report(minecraft, saved, failure, heard));
 		}
-		chat(minecraft, "ffmpeg is not installed. Writing a PNG sequence instead of a video.");
-		return new PngSequenceEncoder(directory.resolve(name));
 	}
 
-	private void writeMarkers(Path output) {
-		if (this.markers.isEmpty() || output == null) {
+	private void writeFrame(Minecraft minecraft, Frame frame) throws IOException {
+		FrameScaler.Size size = FrameScaler.targetSize(frame.width, frame.height, this.resolution.width(), this.resolution.height());
+		int[] pixels = FrameScaler.fit(frame.pixels, frame.width, frame.height, this.resolution.width(), this.resolution.height());
+		if (this.encoder == null) {
+			this.encoder = openEncoder(minecraft, size.width(), size.height());
+		}
+		this.encoder.write(pixels, size.width(), size.height());
+	}
+
+	private FrameEncoder openEncoder(Minecraft minecraft, int width, int height) throws IOException {
+		Path directory = minecraft.gameDirectory.toPath().resolve("repolish");
+		String binary = FfmpegEncoder.binary();
+		String extension = binary != null ? ".mp4" : ".avi";
+		Path file = uniqueFile(directory, sanitize(this.clipName), extension);
+		if (binary != null) {
+			return new FfmpegEncoder(file, this.recordFps, this.wantAudio, binary);
+		}
+		return new MjpegEncoder(file, width, height, this.recordFps);
+	}
+
+	private static void report(Minecraft minecraft, Path output, String error, boolean audio) {
+		if (error != null) {
+			chat(minecraft, "Export failed. " + error);
+		} else if (output != null) {
+			String audioNote = audio
+				? "Game audio is included."
+				: "Video only. Install ffmpeg to capture game audio on a later take.";
+			chat(minecraft, "Saved " + output + ". " + audioNote + " Open Recordings on the main menu.");
+		} else {
+			chat(minecraft, "Recording stopped before a frame was captured.");
+		}
+	}
+
+	private static void writeMarkers(Path output, List<String> markerSnapshot) {
+		if (markerSnapshot.isEmpty() || output == null) {
 			return;
 		}
 		Path markerPath = Path.of(output.toString() + ".markers.txt");
 		try {
-			Files.writeString(markerPath, String.join(System.lineSeparator(), this.markers) + System.lineSeparator());
+			Files.writeString(markerPath, String.join(System.lineSeparator(), markerSnapshot) + System.lineSeparator());
 		} catch (IOException exception) {
 			Repolish.LOGGER.warn("Could not write markers", exception);
 		}
+	}
+
+	public static Path recordingsDirectory(Minecraft minecraft) {
+		return minecraft.gameDirectory.toPath().resolve("repolish");
+	}
+
+	private static Path uniqueFile(Path directory, String name, String extension) throws IOException {
+		Files.createDirectories(directory);
+		Path candidate = directory.resolve(name + extension);
+		int suffix = 2;
+		while (Files.exists(candidate)) {
+			candidate = directory.resolve(name + "-" + suffix + extension);
+			suffix++;
+		}
+		return candidate;
 	}
 
 	private static String sanitize(String name) {
@@ -238,5 +333,8 @@ public final class CaptureController {
 			minecraft.gui.getChat().addMessage(Component.literal("[Repolish] " + message));
 		}
 		Repolish.LOGGER.info(message);
+	}
+
+	private record Frame(int[] pixels, int width, int height) {
 	}
 }

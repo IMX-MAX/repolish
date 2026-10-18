@@ -14,7 +14,7 @@ public final class ExportSettings {
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static ExportSettings instance = new ExportSettings();
 
-	public Resolution resolution = Resolution.P1080;
+	public Resolution resolution = Resolution.WINDOW;
 	public int fps = 60;
 	public boolean matchFov = true;
 	public int fov = 70;
@@ -68,7 +68,7 @@ public final class ExportSettings {
 
 	private void sanitize() {
 		if (this.resolution == null) {
-			this.resolution = Resolution.P1080;
+			this.resolution = Resolution.WINDOW;
 		}
 		if (this.fps != 30 && this.fps != 60 && this.fps != 120) {
 			this.fps = 60;

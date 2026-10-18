@@ -3,6 +3,7 @@ package dev.imxmax.repolish.client.screen;
 import dev.imxmax.repolish.client.CaptureController;
 import dev.imxmax.repolish.client.ExportSettings;
 import dev.imxmax.repolish.client.ShaderPacks;
+import net.minecraft.ChatFormatting;
 import java.util.List;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -95,15 +96,26 @@ public final class ExportSettingsScreen extends Screen {
 		sideY += 28;
 
 		int buttonsX = wide ? right : left;
-		int buttonsY = wide ? sideY : sideY;
-		this.addRenderableWidget(Button.builder(Component.translatable("repolish.button.start"), button -> this.startRecording())
-			.bounds(buttonsX, buttonsY, columnWidth, 20)
-			.build());
-		if (!wide) {
-			buttonsY += 24;
-		} else {
-			buttonsY += 24;
-		}
+		int buttonsY = sideY;
+		boolean recording = CaptureController.isRecording();
+		Component recordLabel = recording
+			? Component.translatable("repolish.button.stop").withStyle(ChatFormatting.RED)
+			: Component.translatable("repolish.button.start");
+		this.addRenderableWidget(Button.builder(recordLabel, button -> {
+			if (CaptureController.isRecording()) {
+				this.stopRecording();
+			} else {
+				this.startRecording();
+			}
+		}).bounds(buttonsX, buttonsY, columnWidth, 20).build());
+		buttonsY += 24;
+		this.addRenderableWidget(Button.builder(Component.translatable("repolish.button.recordings"), button -> {
+			ExportSettings.get().save();
+			if (this.minecraft != null) {
+				this.minecraft.setScreen(new RecordingsScreen(this));
+			}
+		}).bounds(buttonsX, buttonsY, columnWidth, 20).build());
+		buttonsY += 24;
 		this.addRenderableWidget(Button.builder(Component.translatable("repolish.button.done"), button -> this.onClose())
 			.bounds(buttonsX, buttonsY, columnWidth, 20)
 			.build());
@@ -113,6 +125,13 @@ public final class ExportSettingsScreen extends Screen {
 		return CycleButton.builder(label, initial)
 			.withValues(values.stream().toList())
 			.create(x, y, width, 20, name, (button, value) -> onChange.accept(value));
+	}
+
+	private void stopRecording() {
+		if (this.minecraft != null) {
+			CaptureController.toggle(this.minecraft);
+			this.minecraft.setScreen(null);
+		}
 	}
 
 	private void startRecording() {

@@ -18,7 +18,7 @@ These are in Options → Controls → Repolish, and each one can be rebound.
 | F9 | Drop a timestamp marker |
 | F10 | Include or hide the HUD for the recording |
 
-The pause screen also has a Repolish button.
+Press the record key to stop, or press Esc and click the red **Stop recording** button at the top of the pause screen. The pause screen and the main menu both have a **Recordings** button that lists saved videos. The export screen uses the same Stop recording button while a take is running.
 
 ## Export
 
@@ -29,7 +29,7 @@ The export screen sets:
 - smoothing and responsiveness
 - HUD, game audio, and a shader pack when Iris is installed
 
-Videos are written to `repolish/` in the game directory. ffmpeg produces an mp4. Without ffmpeg, Repolish writes a PNG sequence instead. Markers are saved next to the file as `.markers.txt`.
+Videos are written to `repolish/` in the game directory and show up under Recordings on the main menu. Repolish saves an AVI on its own. If ffmpeg is already installed, it saves an mp4 instead and can include game audio from the speakers. On Windows, a missing ffmpeg is downloaded in the background for the next take. The game window stays where it is. A resolution preset only scales the video down. Markers are saved next to the file as `.markers.txt`.
 
 Changing FOV or shaders applies to the next recording. Run the TAS again to export another take.
 
