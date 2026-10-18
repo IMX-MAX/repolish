@@ -74,9 +74,28 @@ public final class OfflineRenderer {
 		String ffmpegBinary,
 		IntConsumer progressPercent
 	) throws IOException {
+		return render(spoolFile, capturedFrames, directory, baseName, fps, maxWidth, maxHeight, audioWav, 0.0, true, ffmpegBinary, progressPercent);
+	}
+
+	public static Result render(
+		Path spoolFile,
+		int capturedFrames,
+		Path directory,
+		String baseName,
+		int fps,
+		int maxWidth,
+		int maxHeight,
+		Path audioWav,
+		double audioOffsetSeconds,
+		boolean deleteAudioWav,
+		String ffmpegBinary,
+		IntConsumer progressPercent
+	) throws IOException {
 		if (capturedFrames <= 0 || !Files.exists(spoolFile)) {
 			deleteQuietly(spoolFile);
-			deleteQuietly(audioWav);
+			if (deleteAudioWav) {
+				deleteQuietly(audioWav);
+			}
 			return new Result(null, false);
 		}
 		String encoder = ffmpegBinary != null ? videoEncoder(ffmpegBinary) : null;
@@ -84,7 +103,7 @@ public final class OfflineRenderer {
 			if (ffmpegBinary != null && encoder != null) {
 				Path mp4 = uniqueFile(directory, baseName, ".mp4");
 				try {
-					boolean audio = renderMp4(spoolFile, capturedFrames, mp4, fps, maxWidth, maxHeight, audioWav, ffmpegBinary, encoder, progressPercent);
+					boolean audio = renderMp4(spoolFile, capturedFrames, mp4, fps, maxWidth, maxHeight, audioWav, audioOffsetSeconds, ffmpegBinary, encoder, progressPercent);
 					return new Result(mp4, audio);
 				} catch (IOException exception) {
 					Repolish.LOGGER.warn("ffmpeg render failed, falling back to high-quality AVI", exception);
@@ -95,12 +114,14 @@ public final class OfflineRenderer {
 			renderAvi(spoolFile, capturedFrames, avi, fps, maxWidth, maxHeight, progressPercent);
 			boolean audio = false;
 			if (ffmpegBinary != null && audioWav != null && Files.exists(audioWav)) {
-				audio = muxAudioIntoAvi(ffmpegBinary, avi, audioWav);
+				audio = muxAudioIntoAvi(ffmpegBinary, avi, audioWav, audioOffsetSeconds);
 			}
 			return new Result(avi, audio);
 		} finally {
 			deleteQuietly(spoolFile);
-			deleteQuietly(audioWav);
+			if (deleteAudioWav) {
+				deleteQuietly(audioWav);
+			}
 		}
 	}
 
@@ -112,6 +133,7 @@ public final class OfflineRenderer {
 		int maxWidth,
 		int maxHeight,
 		Path audioWav,
+		double audioOffsetSeconds,
 		String binary,
 		String encoder,
 		IntConsumer progressPercent
@@ -121,7 +143,7 @@ public final class OfflineRenderer {
 			throw new IOException("No frames in spool");
 		}
 		boolean includeAudio = audioWav != null && Files.exists(audioWav) && Files.size(audioWav) > 44L;
-		Process process = startFfmpeg(binary, encoder, mp4, first.size.width(), first.size.height(), fps, includeAudio ? audioWav : null);
+		Process process = startFfmpeg(binary, encoder, mp4, first.size.width(), first.size.height(), fps, includeAudio ? audioWav : null, audioOffsetSeconds);
 		StringBuilder stderr = new StringBuilder();
 		Thread drain = new Thread(() -> drainStderr(process, stderr), "repolish-render-log");
 		drain.setDaemon(true);
@@ -222,7 +244,7 @@ public final class OfflineRenderer {
 		}
 	}
 
-	private static Process startFfmpeg(String binary, String encoder, Path output, int width, int height, int fps, Path audioWav) throws IOException {
+	private static Process startFfmpeg(String binary, String encoder, Path output, int width, int height, int fps, Path audioWav, double audioOffsetSeconds) throws IOException {
 		List<String> command = new ArrayList<>();
 		command.add(binary);
 		command.add("-y");
@@ -239,6 +261,10 @@ public final class OfflineRenderer {
 		command.add("-i");
 		command.add("pipe:0");
 		if (audioWav != null) {
+			if (audioOffsetSeconds > 0.005) {
+				command.add("-ss");
+				command.add(String.format(java.util.Locale.ROOT, "%.3f", audioOffsetSeconds));
+			}
 			command.add("-i");
 			command.add(audioWav.toString());
 			command.add("-map");
@@ -273,10 +299,29 @@ public final class OfflineRenderer {
 		return new ProcessBuilder(command).start();
 	}
 
-	private static boolean muxAudioIntoAvi(String binary, Path avi, Path wav) {
+	private static boolean muxAudioIntoAvi(String binary, Path avi, Path wav, double audioOffsetSeconds) {
 		Path mixed = avi.resolveSibling(avi.getFileName().toString() + ".mix.avi");
 		try {
-			ProcessBuilder builder = new ProcessBuilder(binary, "-y", "-loglevel", "error", "-i", avi.toString(), "-i", wav.toString(), "-c:v", "copy", "-c:a", "pcm_s16le", "-shortest", mixed.toString());
+			List<String> cmd = new ArrayList<>();
+			cmd.add(binary);
+			cmd.add("-y");
+			cmd.add("-loglevel");
+			cmd.add("error");
+			cmd.add("-i");
+			cmd.add(avi.toString());
+			if (audioOffsetSeconds > 0.005) {
+				cmd.add("-ss");
+				cmd.add(String.format(java.util.Locale.ROOT, "%.3f", audioOffsetSeconds));
+			}
+			cmd.add("-i");
+			cmd.add(wav.toString());
+			cmd.add("-c:v");
+			cmd.add("copy");
+			cmd.add("-c:a");
+			cmd.add("pcm_s16le");
+			cmd.add("-shortest");
+			cmd.add(mixed.toString());
+			ProcessBuilder builder = new ProcessBuilder(cmd);
 			builder.redirectErrorStream(true);
 			Process mux = builder.start();
 			mux.getInputStream().readAllBytes();

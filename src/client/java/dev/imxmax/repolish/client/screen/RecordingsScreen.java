@@ -3,6 +3,8 @@ package dev.imxmax.repolish.client.screen;
 import dev.imxmax.repolish.Repolish;
 import dev.imxmax.repolish.client.CaptureController;
 import dev.imxmax.repolish.client.FfmpegInstaller;
+import dev.imxmax.repolish.client.ReplayController;
+import dev.imxmax.repolish.take.TakeData;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -10,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.ConfirmScreen;
@@ -36,15 +39,38 @@ public final class RecordingsScreen extends Screen {
 		}
 		int y = 36;
 		int shown = 0;
+		boolean inWorld = this.minecraft != null && this.minecraft.level != null && this.minecraft.player != null;
 		for (int index = this.scroll; index < this.files.size() && shown < rows; index++) {
 			Path file = this.files.get(index);
-			String label = file.getFileName().toString();
-			if (label.length() > 42) {
-				label = label.substring(0, 39) + "...";
+			boolean isTake = isTakeFile(file);
+			String name = file.getFileName().toString();
+			String prefix = isTake ? "[Take] " : "[Video] ";
+			String label = prefix + name;
+			if (label.length() > 38) {
+				label = label.substring(0, 35) + "...";
 			}
-			this.addRenderableWidget(Button.builder(Component.literal(label), button -> reveal(file))
-				.bounds(this.width / 2 - 160, y, 250, 20)
-				.build());
+			Component mainLabel = isTake
+				? Component.literal(label).withStyle(ChatFormatting.AQUA)
+				: Component.literal(label);
+
+			this.addRenderableWidget(Button.builder(mainLabel, button -> {
+				if (isTake && inWorld) {
+					ReplayController.get().openTakeFile(this.minecraft, file);
+				} else {
+					reveal(file);
+				}
+			}).bounds(this.width / 2 - 160, y, 200, 20).build());
+
+			if (isTake && inWorld) {
+				this.addRenderableWidget(Button.builder(Component.translatable("repolish.button.edit_take"), button -> {
+					ReplayController.get().openTakeFile(this.minecraft, file);
+				}).bounds(this.width / 2 + 44, y, 48, 20).build());
+			} else {
+				this.addRenderableWidget(Button.builder(Component.literal("Folder"), button -> reveal(file))
+					.bounds(this.width / 2 + 44, y, 48, 20)
+					.build());
+			}
+
 			this.addRenderableWidget(Button.builder(Component.translatable("repolish.button.delete"), button -> this.confirmDelete(file))
 				.bounds(this.width / 2 + 96, y, 64, 20)
 				.build());
@@ -119,7 +145,7 @@ public final class RecordingsScreen extends Screen {
 		Path directory = this.directory();
 		List<Path> found = new ArrayList<>();
 		try (var stream = Files.list(directory)) {
-			stream.filter(RecordingsScreen::isRecording).forEach(found::add);
+			stream.filter(RecordingsScreen::isRecordingOrTake).forEach(found::add);
 		} catch (IOException exception) {
 			Repolish.LOGGER.warn("Could not list recordings", exception);
 		}
@@ -127,9 +153,13 @@ public final class RecordingsScreen extends Screen {
 		return found;
 	}
 
-	private static boolean isRecording(Path path) {
+	private static boolean isTakeFile(Path path) {
+		return path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".rtake");
+	}
+
+	private static boolean isRecordingOrTake(Path path) {
 		String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
-		return name.endsWith(".avi") || name.endsWith(".mp4") || name.endsWith(".mkv");
+		return name.endsWith(".rtake") || name.endsWith(".avi") || name.endsWith(".mp4") || name.endsWith(".mkv");
 	}
 
 	private static java.nio.file.attribute.FileTime modified(Path path) {
@@ -142,6 +172,15 @@ public final class RecordingsScreen extends Screen {
 
 	private static void delete(Path file) {
 		try {
+			if (isTakeFile(file)) {
+				try {
+					TakeData take = TakeData.load(file);
+					if (take.audioFileName() != null && !take.audioFileName().isBlank() && file.getParent() != null) {
+						Files.deleteIfExists(file.getParent().resolve(take.audioFileName()));
+					}
+				} catch (IOException ignored) {
+				}
+			}
 			Files.deleteIfExists(file);
 			Files.deleteIfExists(Path.of(file.toString() + ".markers.txt"));
 		} catch (IOException exception) {

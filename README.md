@@ -1,10 +1,24 @@
 # Repolish
 
-Fabric client mod for Minecraft Java Edition **1.21.11**. Repolish records a TAS or a normal session from inside the game, instead of through OBS, and steadies the camera while it does it.
+Fabric client mod for Minecraft Java Edition **1.21.11**. Repolish records first-person gameplay takes (such as a TAS or speedrun) with zero capture lag, then recreates the footage inside a live **first-person Take Editor** so you can refine camera smoothness, FOV, HUD, and shaders on screen before exporting a clean video.
 
-The recording is the game's own image. Open inventories, mod screens, the HUD, and the shader pack that is currently enabled are in the footage. Game audio is taken from the speakers (the PulseAudio or PipeWire monitor), not from a microphone. Set the export options, start the recording, play the TAS, then stop.
+## How It Works
 
-Smoothing is aimed at TAS look jitter. A large flick still lands on the same tick instead of trailing the way Minecraft's spectator camera does. Turn responsiveness down only if you want a heavier camera.
+1. **Record a First-Person Take (`F8`)**:
+   - While you play or run a TAS, Repolish records high-frequency first-person player state (position, eye height, raw yaw/pitch, walk bobbing, arm swings, sneaking/sprinting, hotbar slot, and markers) into a `.rtake` file alongside optional speaker audio (`.wav`).
+   - Because no GPU framebuffer readback happens while you play, your game runs at full native FPS.
+2. **Recreate & Edit Live in the First-Person Take Editor**:
+   - Stopping a recording immediately opens the take in the **Repolish Take Editor** (you can also re-open any saved `.rtake` later from **Recordings & Takes**).
+   - Repolish reconstructs a continuous 240 Hz mouse trajectory across the whole take using a **velocity-adaptive zero-phase filter**:
+     - 20 TPS staircase turns and micro-jitter are fused into smooth, natural OBS-style mouse arcs **centered on the exact tick of the turn** (never trailing behind the action like Minecraft's spectator camera).
+     - Fast intentional flicks automatically tighten their filter window based on **Responsiveness**, landing crisply on target without floatiness.
+   - Everything in the editor updates **live on your screen**:
+     - Scrub the timeline bar, play/pause (`Space`), step single frames (`<` / `>` or `Left` / `Right`), change playback speed (`0.25x` – `2.0x`), or set **In (`[`)** and **Out (`]`)** trim points.
+     - Toggle **Look: Smooth / Raw TAS (`R`)** at any moment to compare the recreated mouse movement against the raw TAS angles live.
+     - Drag **Smoothing**, **Responsiveness**, **Custom FOV**, toggle **HUD**, or switch **Iris Shader Packs** and watch the 3D first-person viewport update immediately.
+3. **Deterministic Video Export**:
+   - Click **Export video** in the editor to step through `[In .. Out]` deterministically frame-by-frame at `30`, `60`, or `120` fps.
+   - Even with heavy shaders enabled, every frame is rendered at its exact `1 / fps` timestamp and encoded to `.mp4` (`libx264 -preset slow -crf 14` with trimmed speaker audio) or high-quality `.avi`.
 
 ## Controls
 
@@ -12,26 +26,22 @@ These are in Options → Controls → Repolish, and each one can be rebound.
 
 | Default | Action |
 | --- | --- |
-| F6 | Toggle the camera polish preview |
-| F7 | Open export settings |
-| F8 | Start or stop recording |
+| F6 | Toggle live camera polish preview during normal play |
+| F7 | Open Repolish settings |
+| F8 | Start or stop recording a take |
 | F9 | Drop a timestamp marker |
-| F10 | Include or hide the HUD for the recording |
+| F10 | Toggle HUD in the recreated footage |
 
-Press the record key to stop, or press Esc and click the red **Stop recording** button at the top of the pause screen. The pause screen and the main menu both have a **Recordings** button that lists saved videos. The export screen uses the same Stop recording button while a take is running.
+### Editor Shortcuts
 
-## Export
-
-The export screen sets:
-
-- clip name, resolution, and framerate
-- game FOV or a custom FOV
-- smoothing and responsiveness
-- HUD, game audio, and a shader pack when Iris is installed
-
-Videos are written to `repolish/` in the game directory and show up under Recordings on the main menu. During a take, Repolish spools uncompressed frames so gameplay and shaders stay smooth, then renders the final video after you stop. When ffmpeg is available, it renders a high-bitrate mp4 (`crf 14` with `slow` preset) and mixes speaker audio. Without ffmpeg, it renders a high-quality AVI. The video keeps real time even when a frame is captured late. On Windows, a missing ffmpeg is downloaded in the background. The game window stays where it is. A resolution preset only scales the video down. Markers are saved next to the file as `.markers.txt`.
-
-Changing FOV or shaders applies to the next recording. Run the TAS again to export another take.
+| Key | Action |
+| --- | --- |
+| `Space` | Play / Pause take |
+| `Left` / `Right` | Step backward / forward 1 frame |
+| `[` / `]` | Set In / Out trim points at playhead |
+| `R` | Toggle Smooth vs Raw TAS camera comparison |
+| `M` | Place a marker at the playhead |
+| `H` | Show / hide the right-side settings panel |
 
 ## Toolchain
 

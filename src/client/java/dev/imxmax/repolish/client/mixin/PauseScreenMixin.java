@@ -1,6 +1,7 @@
 package dev.imxmax.repolish.client.mixin;
 
 import dev.imxmax.repolish.client.CaptureController;
+import dev.imxmax.repolish.client.ReplayController;
 import dev.imxmax.repolish.client.screen.ExportSettingsScreen;
 import dev.imxmax.repolish.client.screen.RecordingsScreen;
 import net.minecraft.ChatFormatting;
@@ -26,7 +27,9 @@ public abstract class PauseScreenMixin extends Screen {
 			this.addRenderableWidget(Button.builder(Component.translatable("repolish.button.stop").withStyle(ChatFormatting.RED), button -> {
 				if (this.minecraft != null) {
 					CaptureController.toggle(this.minecraft);
-					this.minecraft.setScreen(new PauseScreen(true));
+					if (!ReplayController.isActive()) {
+						this.minecraft.setScreen(new PauseScreen(true));
+					}
 				}
 			}).bounds(x, 6, 204, 20).build());
 		}

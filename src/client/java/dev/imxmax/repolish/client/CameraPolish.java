@@ -21,11 +21,11 @@ public final class CameraPolish {
 	}
 
 	public static boolean wantsPolish() {
-		return ExportSettings.get().preview || CaptureController.isRecording();
+		return ExportSettings.get().preview || CaptureController.isRecording() || ReplayController.isActive();
 	}
 
 	public LookSmoother.Aim polish(Entity entity, float partialTick) {
-		boolean active = wantsPolish();
+		boolean active = ExportSettings.get().preview || CaptureController.isRecording();
 		if (!active || entity == null || (entity instanceof Player player && player.isSpectator())) {
 			if (this.wasActive) {
 				this.smoother.reset();

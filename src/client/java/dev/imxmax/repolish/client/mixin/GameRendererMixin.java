@@ -14,6 +14,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(GameRenderer.class)
 public abstract class GameRendererMixin {
+	@Inject(method = "render", at = @At("HEAD"))
+	private void repolish$beforeRender(DeltaTracker deltaTracker, boolean renderLevel, CallbackInfo ci) {
+		CaptureController.onBeforeRender(
+			((GameRenderer) (Object) this).getMinecraft(),
+			deltaTracker.getGameTimeDeltaPartialTick(true)
+		);
+	}
+
 	@Inject(method = "getFov", at = @At("RETURN"), cancellable = true)
 	private void repolish$overrideFov(Camera camera, float partialTick, boolean applyEffects, CallbackInfoReturnable<Float> cir) {
 		ExportSettings settings = ExportSettings.get();

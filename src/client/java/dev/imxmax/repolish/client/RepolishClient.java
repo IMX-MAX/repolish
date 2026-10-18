@@ -21,14 +21,18 @@ public class RepolishClient implements ClientModInitializer {
 			if (minecraft.player == null) {
 				return;
 			}
+			if (ReplayController.isExporting()) {
+				return;
+			}
 			if (CaptureController.isRecording()) {
+				graphics.drawString(minecraft.font, Component.translatable("repolish.hud.recording", CaptureController.elapsed()), 6, 6, 0xFFFF5555);
 				return;
 			}
 			if (CaptureController.isRendering()) {
 				graphics.drawString(minecraft.font, Component.translatable("repolish.hud.rendering", CaptureController.renderPercent()), 6, 6, 0xFFE7C36A);
 				return;
 			}
-			if (!ExportSettings.get().preview) {
+			if (!ExportSettings.get().preview || ReplayController.isActive()) {
 				return;
 			}
 			graphics.drawString(minecraft.font, Component.translatable("repolish.hud.preview"), 6, 6, 0xFFE7C36A);
@@ -40,6 +44,7 @@ public class RepolishClient implements ClientModInitializer {
 		if (minecraft.player == null) {
 			return;
 		}
+		CaptureController.onTick(minecraft);
 		while (RepolishKeybinds.record.consumeClick()) {
 			CaptureController.toggle(minecraft);
 		}
@@ -55,7 +60,7 @@ public class RepolishClient implements ClientModInitializer {
 			minecraft.gui.getChat().addMessage(Component.translatable(settings.preview ? "repolish.chat.preview_on" : "repolish.chat.preview_off"));
 		}
 		while (RepolishKeybinds.marker.consumeClick()) {
-			if (CaptureController.isRecording()) {
+			if (CaptureController.isRecording() || ReplayController.isActive()) {
 				CaptureController.mark();
 				minecraft.gui.getChat().addMessage(Component.translatable("repolish.chat.marker", CaptureController.markerCount()));
 			} else {

@@ -130,7 +130,9 @@ public final class ExportSettingsScreen extends Screen {
 	private void stopRecording() {
 		if (this.minecraft != null) {
 			CaptureController.toggle(this.minecraft);
-			this.minecraft.setScreen(null);
+			if (!dev.imxmax.repolish.client.ReplayController.isActive()) {
+				this.minecraft.setScreen(null);
+			}
 		}
 	}
 
