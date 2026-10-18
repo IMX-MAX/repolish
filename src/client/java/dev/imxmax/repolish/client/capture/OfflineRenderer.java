@@ -281,7 +281,7 @@ public final class OfflineRenderer {
 		command.add(encoder);
 		if ("libx264".equals(encoder)) {
 			command.add("-preset");
-			command.add("slow");
+			command.add("fast");
 			command.add("-crf");
 			command.add("14");
 		} else if ("h264_mf".equals(encoder)) {
