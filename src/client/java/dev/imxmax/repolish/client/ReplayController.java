@@ -55,8 +55,6 @@ public final class ReplayController {
 
 	// Saved player state before entering the replay editor
 	private SavedPlayerState savedPlayerState;
-	// Saved world clock so the recreation can pin the world to the recorded time
-	private long savedWorldDayTime = -1L;
 
 	// Deterministic frame-by-frame export state
 	private volatile boolean exporting;
@@ -122,7 +120,6 @@ public final class ReplayController {
 		}
 		if (!this.active) {
 			this.savedPlayerState = SavedPlayerState.capture(minecraft);
-			this.savedWorldDayTime = minecraft.level.getDayTime();
 		}
 		this.take = take;
 		this.takeFile = takeFile;
@@ -176,10 +173,6 @@ public final class ReplayController {
 		if (this.savedPlayerState != null) {
 			this.savedPlayerState.restore(minecraft);
 			this.savedPlayerState = null;
-		}
-		if (minecraft.level != null && this.savedWorldDayTime >= 0L) {
-			minecraft.level.setDayTime(this.savedWorldDayTime);
-			this.savedWorldDayTime = -1L;
 		}
 	}
 
@@ -439,7 +432,6 @@ public final class ReplayController {
 
 		this.evaluateSample();
 		this.applyToPlayer(minecraft);
-		this.applyWorldClock(minecraft);
 	}
 
 	/**
@@ -464,17 +456,20 @@ public final class ReplayController {
 	}
 
 	/**
-	 * Pins the client world clock to the recorded take (Flashback-style): the
-	 * day time and game time at the current playhead are reconstructed from the
-	 * clock captured when recording started, so sky, lighting, and time-of-day
-	 * in the recreation match the original footage exactly.
+	 * Day time the recreation should render with, read by
+	 * {@code ClientLevelDataMixin#getDayTime}. Flashback-style: the world clock
+	 * is reconstructed from the clock captured at record start plus the current
+	 * playhead, so sky, lighting, and time-of-day match the original footage.
+	 * Returns {@code null} when no take with a recorded clock is open, leaving
+	 * the real world time untouched.
 	 */
-	private void applyWorldClock(Minecraft minecraft) {
-		if (this.take == null || minecraft.level == null || !this.take.hasRecordedClock()) {
-			return;
+	public static Long replayDayTime() {
+		ReplayController controller = INSTANCE;
+		if (!controller.active || controller.take == null || !controller.take.hasRecordedClock()) {
+			return null;
 		}
-		long playheadTicks = (long) Math.floor(this.playhead * 20.0);
-		minecraft.level.setDayTime(this.take.recordedDayTime() + playheadTicks);
+		long playheadTicks = (long) Math.floor(controller.playhead * 20.0);
+		return controller.take.recordedDayTime() + playheadTicks;
 	}
 
 	public void onAfterRender(Minecraft minecraft) {
