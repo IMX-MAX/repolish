@@ -17,7 +17,6 @@ class TakeTrajectoryTest {
 	void roundTripsTakeDataAndMarkers() throws IOException {
 		TakeData take = new TakeData("tas_run", 123456789L, 90);
 		take.setRecordedDayTime(18042L);
-		take.setRecordedGameTime(18050L);
 		take.setAudioFileName(".tas_run-audio.wav");
 		take.addMarker(0.25);
 		take.addMarker(1.50);
@@ -33,7 +32,6 @@ class TakeTrajectoryTest {
 		assertEquals(90, loaded.recordedFov());
 		assertTrue(loaded.hasRecordedClock());
 		assertEquals(18042L, loaded.recordedDayTime());
-		assertEquals(18050L, loaded.recordedGameTime());
 		assertEquals(".tas_run-audio.wav", loaded.audioFileName());
 		assertEquals(2, loaded.markers().size());
 		assertEquals(0.25, loaded.markers().get(0), 1.0E-6);

@@ -1,0 +1,5 @@
+accessWidener v2 named
+accessible field net/minecraft/client/DeltaTracker$Timer deltaTicks F
+accessible field net/minecraft/client/DeltaTracker$Timer realtimeDeltaTicks F
+accessible field net/minecraft/client/DeltaTracker$Timer deltaTickResidual F
+accessible field net/minecraft/client/DeltaTracker$Timer pausedDeltaTickResidual F

@@ -57,7 +57,6 @@ public final class ReplayController {
 	private SavedPlayerState savedPlayerState;
 	// Saved world clock so the recreation can pin the world to the recorded time
 	private long savedWorldDayTime = -1L;
-	private long savedWorldGameTime = -1L;
 
 	// Deterministic frame-by-frame export state
 	private volatile boolean exporting;
@@ -124,7 +123,6 @@ public final class ReplayController {
 		if (!this.active) {
 			this.savedPlayerState = SavedPlayerState.capture(minecraft);
 			this.savedWorldDayTime = minecraft.level.getDayTime();
-			this.savedWorldGameTime = minecraft.level.getGameTime();
 		}
 		this.take = take;
 		this.takeFile = takeFile;
@@ -181,9 +179,7 @@ public final class ReplayController {
 		}
 		if (minecraft.level != null && this.savedWorldDayTime >= 0L) {
 			minecraft.level.setDayTime(this.savedWorldDayTime);
-			minecraft.level.getLevelData().setGameTime(this.savedWorldGameTime);
 			this.savedWorldDayTime = -1L;
-			this.savedWorldGameTime = -1L;
 		}
 	}
 
@@ -477,11 +473,8 @@ public final class ReplayController {
 		if (this.take == null || minecraft.level == null || !this.take.hasRecordedClock()) {
 			return;
 		}
-		double playheadTicks = this.playhead * 20.0;
-		long dayTime = this.take.recordedDayTime() + (long) Math.floor(playheadTicks);
-		long gameTime = this.take.recordedGameTime() + (long) Math.floor(playheadTicks);
-		minecraft.level.setDayTime(dayTime);
-		minecraft.level.getLevelData().setGameTime(gameTime);
+		long playheadTicks = (long) Math.floor(this.playhead * 20.0);
+		minecraft.level.setDayTime(this.take.recordedDayTime() + playheadTicks);
 	}
 
 	public void onAfterRender(Minecraft minecraft) {

@@ -29,7 +29,6 @@ public final class TakeData {
 	private long createdAtMillis;
 	private int recordedFov;
 	private long recordedDayTime;
-	private long recordedGameTime;
 	private boolean hasRecordedClock;
 	private String audioFileName;
 	private final List<Sample> samples = new ArrayList<>();
@@ -65,15 +64,6 @@ public final class TakeData {
 
 	public void setRecordedDayTime(long recordedDayTime) {
 		this.recordedDayTime = recordedDayTime;
-	}
-
-	public long recordedGameTime() {
-		return this.recordedGameTime;
-	}
-
-	public void setRecordedGameTime(long recordedGameTime) {
-		this.recordedGameTime = recordedGameTime;
-		this.hasRecordedClock = true;
 	}
 
 	public boolean hasRecordedClock() {
@@ -129,7 +119,6 @@ public final class TakeData {
 			out.writeLong(this.createdAtMillis);
 			out.writeInt(this.recordedFov);
 			out.writeLong(this.recordedDayTime);
-			out.writeLong(this.recordedGameTime);
 			out.writeUTF(this.audioFileName == null ? "" : this.audioFileName);
 			out.writeInt(this.markers.size());
 			for (double marker : this.markers) {
@@ -172,7 +161,6 @@ public final class TakeData {
 			TakeData take = new TakeData(name, createdAt, fov);
 			if (version >= 2) {
 				take.setRecordedDayTime(in.readLong());
-				take.setRecordedGameTime(in.readLong());
 			}
 
 			String audioFile = in.readUTF();

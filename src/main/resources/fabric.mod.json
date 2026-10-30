@@ -12,6 +12,7 @@
 	},
 	"license": "CC0-1.0",
 	"icon": "assets/repolish/icon.png",
+	"accessWidener": "repolish.accesswidener",
 	"environment": "client",
 	"entrypoints": {
 		"main": [
