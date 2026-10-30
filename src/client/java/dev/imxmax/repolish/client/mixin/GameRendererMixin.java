@@ -30,7 +30,7 @@ public abstract class GameRendererMixin {
 			// The recreation renders with the FOV the take was recorded with (or the
 			// user's custom FOV), so the recreated scene matches the original footage.
 			cir.setReturnValue(ReplayController.get().activeFov());
-		} else if (!settings.matchFov && CameraPolish.wantsPolish()) {
+		} else if (!settings.matchFov && CameraPolish.wantsPolish() && CameraPolish.polishesLivePlay()) {
 			cir.setReturnValue((float) settings.fov);
 		}
 	}

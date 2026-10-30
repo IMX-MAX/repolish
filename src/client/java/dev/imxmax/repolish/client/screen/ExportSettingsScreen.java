@@ -86,6 +86,11 @@ public final class ExportSettingsScreen extends Screen {
 			.create(sideX, sideY, columnWidth, 20, Component.translatable("repolish.setting.audio"), (button, value) -> settings.includeAudio = value));
 		sideY += 24;
 
+		CycleButton<Boolean> recordRaw = this.addRenderableWidget(CycleButton.onOffBuilder(settings.recordRaw)
+			.create(sideX, sideY, columnWidth, 20, Component.translatable("repolish.setting.record_raw"), (button, value) -> settings.recordRaw = value));
+		recordRaw.setTooltip(Tooltip.create(Component.translatable("repolish.setting.record_raw.tooltip")));
+		sideY += 24;
+
 		List<String> shaders = ShaderPacks.choices(this.minecraft);
 		if (!shaders.contains(settings.shader)) {
 			settings.shader = ShaderPacks.CURRENT;

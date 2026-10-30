@@ -79,6 +79,7 @@ public final class ReplayController {
 	private int exportFov;
 	private boolean exportIncludeHud;
 	private boolean exportIncludeAudio;
+	private String preExportShader;
 	private String exportFfmpeg;
 	private String exportEncoder;
 	private int exportTargetWidth;
@@ -319,6 +320,7 @@ public final class ReplayController {
 		this.exportFov = settings.fov;
 		this.exportIncludeHud = settings.includeHud;
 		this.exportIncludeAudio = settings.includeAudio;
+		this.preExportShader = settings.shader;
 		this.exportGeneration++;
 		this.frameCapturePending = false;
 		this.playing = false;
@@ -365,6 +367,7 @@ public final class ReplayController {
 		this.frameCapturePending = false;
 		this.exportGeneration++;
 		minecraft.options.hideGui = this.preExportHideGui;
+		ShaderPacks.apply(this.preExportShader);
 		ExportPipe pipe = this.exportPipe;
 		this.exportPipe = null;
 		if (pipe != null) {
@@ -522,6 +525,7 @@ public final class ReplayController {
 	private void finishCaptureAndEncode(Minecraft minecraft) {
 		this.exporting = false;
 		minecraft.options.hideGui = this.preExportHideGui;
+		ShaderPacks.apply(this.preExportShader);
 
 		ExportPipe pipe = this.exportPipe;
 		this.exportPipe = null;
@@ -700,8 +704,9 @@ public final class ReplayController {
 		float smoothing;
 		float responsiveness;
 		if (this.exporting) {
-			// Frozen at export start so live edits never leak into the exported video.
-			smoothing = this.compareRaw ? 0.0F : this.exportSmoothing;
+			// Frozen at export start so live edits never leak into the exported
+			// video, and the export always uses the polished look (never raw).
+			smoothing = this.exportSmoothing;
 			responsiveness = this.exportResponsiveness;
 		} else {
 			ExportSettings settings = ExportSettings.get();

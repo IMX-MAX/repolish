@@ -23,6 +23,7 @@ public final class ExportSettings {
 	public boolean includeHud = true;
 	public boolean includeAudio = true;
 	public boolean preview = false;
+	public boolean recordRaw = false;
 	public String shader = "current";
 	public String clipName = "clip";
 
