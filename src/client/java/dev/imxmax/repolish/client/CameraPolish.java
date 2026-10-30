@@ -24,8 +24,17 @@ public final class CameraPolish {
 		return ExportSettings.get().preview || CaptureController.isRecording() || ReplayController.isActive();
 	}
 
+	/**
+	 * When "record raw" is on, live gameplay (recording) keeps the untouched
+	 * vanilla camera so the take is captured exactly as played; smoothing is
+	 * only applied later, when the take is recreated for preview or export.
+	 */
+	public static boolean polishesLivePlay() {
+		return !ExportSettings.get().recordRaw || !CaptureController.isRecording();
+	}
+
 	public LookSmoother.Aim polish(Entity entity, float partialTick) {
-		boolean active = ExportSettings.get().preview || CaptureController.isRecording();
+		boolean active = (ExportSettings.get().preview || CaptureController.isRecording()) && polishesLivePlay();
 		if (!active || entity == null || (entity instanceof Player player && player.isSpectator())) {
 			if (this.wasActive) {
 				this.smoother.reset();

@@ -17,6 +17,8 @@
 	"repolish.setting.responsiveness.tooltip": "Keeps fast flicks crisp and centered on the action so they never trail like spectator mode.",
 	"repolish.setting.hud": "HUD and GUIs",
 	"repolish.setting.audio": "Game audio",
+	"repolish.setting.record_raw": "Record raw (no live polish)",
+	"repolish.setting.record_raw.tooltip": "Records your gameplay untouched (no live smoothing or custom FOV) so laggy, shaky footage can be smoothed, re-FOV'd, and shader-ified later when you export.",
 	"repolish.setting.shader": "Shader pack",
 	"repolish.button.start": "Start recording take",
 	"repolish.button.stop": "Stop & edit take",

@@ -2,6 +2,8 @@ package dev.imxmax.repolish.client;
 
 import com.mojang.blaze3d.platform.NativeImage;
 import dev.imxmax.repolish.Repolish;
+import dev.imxmax.repolish.capture.PixelPack;
+import dev.imxmax.repolish.client.capture.ExportPipe;
 import dev.imxmax.repolish.client.capture.OfflineRenderer;
 import dev.imxmax.repolish.client.capture.SpeakerCapture;
 import dev.imxmax.repolish.client.screen.TakeEditorScreen;
@@ -32,6 +34,8 @@ import net.minecraft.world.entity.Pose;
 public final class ReplayController {
 	private static final ReplayController INSTANCE = new ReplayController();
 	private static final Pose[] POSES = Pose.values();
+	private static final String[] ENCODER_CACHE = new String[2];
+	private static boolean encoderProbed;
 
 	private TakeData take;
 	private Path takeFile;
@@ -66,6 +70,21 @@ public final class ReplayController {
 	private Path exportSpoolPath;
 	private OfflineRenderer.Spool exportSpool;
 	private boolean preExportHideGui;
+
+	// Settings frozen at the moment the export started, so the exported video
+	// always matches what was configured even if the live settings change later.
+	private float exportSmoothing;
+	private float exportResponsiveness;
+	private boolean exportMatchFov;
+	private int exportFov;
+	private boolean exportIncludeHud;
+	private boolean exportIncludeAudio;
+	private String preExportShader;
+	private String exportFfmpeg;
+	private String exportEncoder;
+	private int exportTargetWidth;
+	private int exportTargetHeight;
+	private ExportPipe exportPipe;
 
 	private ReplayController() {
 	}
@@ -295,6 +314,13 @@ public final class ReplayController {
 		this.exportFrameIndex = 0;
 		this.exportResolution = settings.resolution == null ? ExportSettings.Resolution.WINDOW : settings.resolution;
 		this.exportName = sanitize(settings.clipName);
+		this.exportSmoothing = settings.smoothingAmount();
+		this.exportResponsiveness = settings.responsivenessAmount();
+		this.exportMatchFov = settings.matchFov;
+		this.exportFov = settings.fov;
+		this.exportIncludeHud = settings.includeHud;
+		this.exportIncludeAudio = settings.includeAudio;
+		this.preExportShader = settings.shader;
 		this.exportGeneration++;
 		this.frameCapturePending = false;
 		this.playing = false;
@@ -304,11 +330,25 @@ public final class ReplayController {
 		minecraft.options.setCameraType(CameraType.FIRST_PERSON);
 		minecraft.options.hideGui = !settings.includeHud;
 
+		String[] encoderPair = resolveExportEncoder();
+		this.exportFfmpeg = encoderPair[0];
+		this.exportEncoder = encoderPair[1];
+		this.exportTargetWidth = 0;
+		this.exportTargetHeight = 0;
+		this.exportPipe = null;
+
 		Path directory = CaptureController.recordingsDirectory(minecraft);
 		try {
 			Files.createDirectories(directory);
-			this.exportSpoolPath = directory.resolve(".repolish-export-" + this.exportGeneration + ".raw");
-			this.exportSpool = new OfflineRenderer.Spool(this.exportSpoolPath);
+			// When ffmpeg is available, frames stream straight into it and no
+			// uncompressed spool is needed. Without ffmpeg, fall back to the
+			// spool so the export still produces a high-quality AVI.
+			this.exportSpoolPath = null;
+			this.exportSpool = null;
+			if (this.exportEncoder == null) {
+				this.exportSpoolPath = directory.resolve(".repolish-export-" + this.exportGeneration + ".raw");
+				this.exportSpool = new OfflineRenderer.Spool(this.exportSpoolPath);
+			}
 			this.exporting = true;
 			this.playhead = this.exportStartSeconds;
 			this.evaluateSample();
@@ -327,6 +367,13 @@ public final class ReplayController {
 		this.frameCapturePending = false;
 		this.exportGeneration++;
 		minecraft.options.hideGui = this.preExportHideGui;
+		ShaderPacks.apply(this.preExportShader);
+		ExportPipe pipe = this.exportPipe;
+		this.exportPipe = null;
+		if (pipe != null) {
+			pipe.abort();
+			deleteQuietly(pipe.output());
+		}
 		closeSpoolQuietly();
 		if (this.exportSpoolPath != null) {
 			try {
@@ -337,13 +384,33 @@ public final class ReplayController {
 		chat(minecraft, "Export canceled.");
 	}
 
+	/**
+	 * FOV used by the live recreation and export. When "match FOV" is on this is
+	 * the FOV the take was actually recorded with, so the recreated footage looks
+	 * like the original gameplay instead of whatever FOV the options menu has now.
+	 */
+	public float activeFov() {
+		if (this.take != null && this.take.recordedFov() > 0) {
+			if (this.exporting) {
+				return this.exportMatchFov ? this.take.recordedFov() : this.exportFov;
+			}
+			ExportSettings settings = ExportSettings.get();
+			return settings.matchFov ? this.take.recordedFov() : settings.fov;
+		}
+		ExportSettings settings = ExportSettings.get();
+		return settings.matchFov ? 70 : settings.fov;
+	}
+
 	public void onBeforeRender(Minecraft minecraft) {
 		if (!this.active || this.take == null || minecraft.player == null || minecraft.level == null) {
 			return;
 		}
-		ExportSettings settings = ExportSettings.get();
 		minecraft.options.setCameraType(CameraType.FIRST_PERSON);
-		minecraft.options.hideGui = !settings.includeHud;
+		if (this.exporting) {
+			minecraft.options.hideGui = !this.exportIncludeHud;
+		} else {
+			minecraft.options.hideGui = !ExportSettings.get().includeHud;
+		}
 
 		if (this.exporting) {
 			double targetTime = Math.min(this.outTime, this.exportStartSeconds + this.exportFrameIndex / (double) this.exportFps);
@@ -367,7 +434,13 @@ public final class ReplayController {
 	}
 
 	public void onAfterRender(Minecraft minecraft) {
-		if (!this.active || !this.exporting || this.frameCapturePending || this.exportSpool == null) {
+		if (!this.active || !this.exporting || this.frameCapturePending) {
+			return;
+		}
+		// Frames go either to the streaming ffmpeg pipe (opened lazily once the
+		// first frame reveals its size) or to the fallback spool when no ffmpeg
+		// encoder is available.
+		if (this.exportSpool == null && this.exportEncoder == null) {
 			return;
 		}
 		int gen = this.exportGeneration;
@@ -385,20 +458,61 @@ public final class ReplayController {
 
 	private void acceptExportFrame(Minecraft minecraft, int gen, int frameIdx, long timestampNanos, NativeImage image) {
 		try {
-			if (gen != this.exportGeneration || !this.exporting || this.exportSpool == null) {
+			if (gen != this.exportGeneration || !this.exporting || (this.exportSpool == null && this.exportPipe == null)) {
 				return;
 			}
 			int width = image.getWidth();
 			int height = image.getHeight();
 			int[] copy = Arrays.copyOf(image.getPixelsABGR(), width * height);
-			this.exportSpool.write(timestampNanos, width, height, copy);
+			if (this.exportPipe == null && this.exportEncoder != null) {
+				// First frame: open the streaming ffmpeg pipe with the real frame size.
+				Path directory = CaptureController.recordingsDirectory(minecraft);
+				Path audioWav = resolveExportAudio(directory);
+				int targetW = this.exportResolution.width();
+				int targetH = this.exportResolution.height();
+				if (targetW > 0 && targetH > 0 && (targetW != width || targetH != height)) {
+					this.exportTargetWidth = targetW & ~1;
+					this.exportTargetHeight = targetH & ~1;
+				} else {
+					this.exportTargetWidth = 0;
+					this.exportTargetHeight = 0;
+				}
+				try {
+					this.exportPipe = ExportPipe.open(
+						this.exportFfmpeg,
+						this.exportEncoder,
+						this.exportFps,
+						directory,
+						this.exportName,
+						this.exportTargetWidth,
+						this.exportTargetHeight,
+						audioWav,
+						this.exportStartSeconds,
+						width,
+						height
+					);
+					this.exportPipe.write(PixelPack.abgrToRgba(copy, width * height), width, height);
+				} catch (IOException pipeFailure) {
+					// Streaming encode is unavailable: keep exporting into the
+					// spool and let the offline AVI renderer finish the video.
+					Repolish.LOGGER.warn("ffmpeg pipe failed, falling back to spool export", pipeFailure);
+					this.exportEncoder = null;
+					this.exportSpoolPath = directory.resolve(".repolish-export-" + this.exportGeneration + ".raw");
+					this.exportSpool = new OfflineRenderer.Spool(this.exportSpoolPath);
+					this.exportSpool.write(timestampNanos, width, height, copy);
+				}
+			} else if (this.exportPipe != null) {
+				this.exportPipe.write(PixelPack.abgrToRgba(copy, width * height), width, height);
+			} else {
+				this.exportSpool.write(timestampNanos, width, height, copy);
+			}
 			this.exportFrameIndex = frameIdx + 1;
 			this.progressPercent = Math.min(99, this.exportFrameIndex * 100 / Math.max(1, this.exportTotalFrames));
 			if (this.exportFrameIndex >= this.exportTotalFrames) {
 				this.finishCaptureAndEncode(minecraft);
 			}
 		} catch (IOException exception) {
-			Repolish.LOGGER.error("Failed writing exported frame to spool", exception);
+			Repolish.LOGGER.error("Failed writing exported frame", exception);
 			this.cancelExport(minecraft);
 		} finally {
 			image.close();
@@ -411,10 +525,63 @@ public final class ReplayController {
 	private void finishCaptureAndEncode(Minecraft minecraft) {
 		this.exporting = false;
 		minecraft.options.hideGui = this.preExportHideGui;
+		ShaderPacks.apply(this.preExportShader);
+
+		ExportPipe pipe = this.exportPipe;
+		this.exportPipe = null;
 		OfflineRenderer.Spool spool = this.exportSpool;
 		Path spoolPath = this.exportSpoolPath;
 		this.exportSpool = null;
 		this.exportSpoolPath = null;
+
+		Path directory = CaptureController.recordingsDirectory(minecraft);
+		List<String> trimmedMarkers = collectTrimmedMarkers();
+
+		if (pipe != null) {
+			// Frames were streamed into ffmpeg while rendering; finishing the file
+			// only takes the time ffmpeg needs to write the container tail.
+			this.encoding = true;
+			this.progressPercent = 100;
+			Thread finisher = new Thread(() -> {
+				String error = null;
+				Path output = pipe.output();
+				boolean hasAudio = pipe.audio();
+				try {
+					if (!pipe.finish()) {
+						error = "ffmpeg could not finish the video";
+						deleteQuietly(output);
+						output = null;
+					}
+					if (output != null && !trimmedMarkers.isEmpty()) {
+						Path markerPath = Path.of(output.toString() + ".markers.txt");
+						Files.writeString(markerPath, String.join(System.lineSeparator(), trimmedMarkers) + System.lineSeparator());
+					}
+				} catch (Exception exception) {
+					error = exception.getMessage();
+					Repolish.LOGGER.error("Take video encode failed", exception);
+					deleteQuietly(output);
+					output = null;
+				} finally {
+					this.encoding = false;
+					this.progressPercent = 0;
+					Path saved = output;
+					String failure = error;
+					boolean audioIncluded = hasAudio;
+					minecraft.execute(() -> {
+						if (failure != null) {
+							chat(minecraft, "Export failed: " + failure);
+						} else if (saved != null) {
+							String audioNote = audioIncluded ? "Game audio included." : "Video only.";
+							chat(minecraft, "Exported recreated video to " + saved.getFileName() + " (" + audioNote + ")");
+						}
+					});
+				}
+			}, "repolish-take-encode");
+			finisher.setDaemon(true);
+			finisher.start();
+			return;
+		}
+
 		if (spool == null || spoolPath == null) {
 			return;
 		}
@@ -425,71 +592,95 @@ public final class ReplayController {
 			Repolish.LOGGER.warn("Could not close export spool", exception);
 		}
 
-		Path directory = CaptureController.recordingsDirectory(minecraft);
 		String baseName = this.exportName;
 		int fps = this.exportFps;
 		int maxW = this.exportResolution.width();
 		int maxH = this.exportResolution.height();
 		double audioOffset = this.exportStartSeconds;
-		boolean wantAudio = ExportSettings.get().includeAudio;
-		Path audioWav = null;
-		if (wantAudio && this.take != null && this.take.audioFileName() != null && !this.take.audioFileName().isBlank()) {
-			Path candidate = directory.resolve(this.take.audioFileName());
-			if (Files.exists(candidate)) {
-				audioWav = candidate;
-			}
-		}
-		Path finalAudioWav = audioWav;
-		List<String> trimmedMarkers = collectTrimmedMarkers();
+		Path finalAudioWav = resolveExportAudio(directory);
 
 		this.encoding = true;
 		this.progressPercent = 0;
 		Thread encoderThread = new Thread(() -> {
-			String error = null;
-			Path output = null;
-			boolean hasAudio = false;
-			try {
-				OfflineRenderer.Result result = OfflineRenderer.render(
+				String error = null;
+				Path output = null;
+				boolean hasAudio = false;
+				try {
+					OfflineRenderer.Result result = OfflineRenderer.render(
 					spoolPath,
-					captured,
-					directory,
-					baseName,
-					fps,
-					maxW,
-					maxH,
-					finalAudioWav,
-					audioOffset,
-					false,
-					SpeakerCapture.binary(),
-					pct -> this.progressPercent = pct
-				);
-				output = result.output();
-				hasAudio = result.audio();
-				if (output != null && !trimmedMarkers.isEmpty()) {
-					Path markerPath = Path.of(output.toString() + ".markers.txt");
-					Files.writeString(markerPath, String.join(System.lineSeparator(), trimmedMarkers) + System.lineSeparator());
-				}
-			} catch (Exception exception) {
-				error = exception.getMessage();
-				Repolish.LOGGER.error("Take video encode failed", exception);
-			} finally {
-				this.encoding = false;
-				this.progressPercent = 0;
-				Path saved = output;
-				String failure = error;
-				boolean audioIncluded = hasAudio;
-				minecraft.execute(() -> {
-					if (failure != null) {
-						chat(minecraft, "Export failed: " + failure);
-					} else if (saved != null) {
-						String audioNote = audioIncluded ? "Game audio included." : "Video only.";
-						chat(minecraft, "Exported recreated video to " + saved.getFileName() + " (" + audioNote + ")");
+						captured,
+						directory,
+						baseName,
+						fps,
+						maxW,
+						maxH,
+						finalAudioWav,
+						audioOffset,
+						false,
+						this.exportFfmpeg,
+						pct -> this.progressPercent = pct
+					);
+					output = result.output();
+					hasAudio = result.audio();
+					if (output != null && !trimmedMarkers.isEmpty()) {
+						Path markerPath = Path.of(output.toString() + ".markers.txt");
+						Files.writeString(markerPath, String.join(System.lineSeparator(), trimmedMarkers) + System.lineSeparator());
 					}
-				});
+				} catch (Exception exception) {
+					error = exception.getMessage();
+					Repolish.LOGGER.error("Take video encode failed", exception);
+				} finally {
+					this.encoding = false;
+					this.progressPercent = 0;
+					Path saved = output;
+					String failure = error;
+					boolean audioIncluded = hasAudio;
+					minecraft.execute(() -> {
+						if (failure != null) {
+							chat(minecraft, "Export failed: " + failure);
+						} else if (saved != null) {
+							String audioNote = audioIncluded ? "Game audio included." : "Video only.";
+							chat(minecraft, "Exported recreated video to " + saved.getFileName() + " (" + audioNote + ")");
+						}
+					});
+				}
+			}, "repolish-take-encode");
+			encoderThread.setDaemon(true);
+			encoderThread.start();
+	}
+
+	/**
+	 * ffmpeg is probed at most once per game session; the result is cached so
+	 * starting an export never stalls the render thread on process spawns.
+	 */
+	private static String[] resolveExportEncoder() {
+		synchronized (ENCODER_CACHE) {
+			if (!encoderProbed) {
+				String binary = SpeakerCapture.binary();
+				ENCODER_CACHE[0] = binary;
+				ENCODER_CACHE[1] = binary == null ? null : OfflineRenderer.videoEncoder(binary);
+				encoderProbed = true;
 			}
-		}, "repolish-take-encode");
-		encoderThread.setDaemon(true);
-		encoderThread.start();
+			return ENCODER_CACHE;
+		}
+	}
+
+	private Path resolveExportAudio(Path directory) {
+		if (!this.exportIncludeAudio || this.take == null || this.take.audioFileName() == null || this.take.audioFileName().isBlank()) {
+			return null;
+		}
+		Path candidate = directory.resolve(this.take.audioFileName());
+		return Files.exists(candidate) ? candidate : null;
+	}
+
+	private static void deleteQuietly(Path path) {
+		if (path == null) {
+			return;
+		}
+		try {
+			Files.deleteIfExists(path);
+		} catch (IOException ignored) {
+		}
 	}
 
 	private List<String> collectTrimmedMarkers() {
@@ -510,9 +701,18 @@ public final class ReplayController {
 			this.currentSample = null;
 			return;
 		}
-		ExportSettings settings = ExportSettings.get();
-		float smoothing = this.compareRaw ? 0.0F : settings.smoothingAmount();
-		float responsiveness = settings.responsivenessAmount();
+		float smoothing;
+		float responsiveness;
+		if (this.exporting) {
+			// Frozen at export start so live edits never leak into the exported
+			// video, and the export always uses the polished look (never raw).
+			smoothing = this.exportSmoothing;
+			responsiveness = this.exportResponsiveness;
+		} else {
+			ExportSettings settings = ExportSettings.get();
+			smoothing = this.compareRaw ? 0.0F : settings.smoothingAmount();
+			responsiveness = settings.responsivenessAmount();
+		}
 		this.currentSample = this.trajectory.sampleAt(this.playhead, smoothing, responsiveness);
 	}
 
@@ -523,14 +723,17 @@ public final class ReplayController {
 			return;
 		}
 
-		double dx = sample.x() - player.getX();
-		double dy = sample.y() - player.getY();
-		double dz = sample.z() - player.getZ();
-
 		player.setPos(sample.x(), sample.y(), sample.z());
 		player.xo = sample.x();
 		player.yo = sample.y();
 		player.zo = sample.z();
+		// Kill gameplay momentum so physics never fights the recreated path; a
+		// drifting client prediction is what made old exports wobble and snap back.
+		player.setDeltaMovement(0.0, 0.0, 0.0);
+		player.fallDistance = 0.0F;
+		// Keep the integrated-server player locked to the same path so server-side
+		// corrections never rubber-band the recreation.
+		syncIntegratedServerPlayer(minecraft, player.getUUID(), sample);
 
 		player.setYRot(sample.yaw());
 		player.setXRot(sample.pitch());
@@ -569,9 +772,6 @@ public final class ReplayController {
 			}
 		}
 
-		if (dx * dx + dy * dy + dz * dz > 16.0) {
-			syncIntegratedServerPlayer(minecraft, player.getUUID(), sample);
-		}
 	}
 
 	private static void syncIntegratedServerPlayer(Minecraft minecraft, UUID uuid, TakeData.Sample sample) {

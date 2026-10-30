@@ -191,6 +191,11 @@ public final class TakeEditorScreen extends Screen {
 			.create(panelX + panelW / 2 + 1, py, panelW / 2 - 1, 18, Component.literal("Audio"), (button, value) -> settings.includeAudio = value));
 		py += 20;
 
+		CycleButton<Boolean> recordRaw = this.addRenderableWidget(CycleButton.onOffBuilder(settings.recordRaw)
+			.create(panelX, py, panelW, 18, Component.translatable("repolish.setting.record_raw"), (button, value) -> settings.recordRaw = value));
+		recordRaw.setTooltip(Tooltip.create(Component.translatable("repolish.setting.record_raw.tooltip")));
+		py += 20;
+
 		this.addRenderableWidget(this.cycle(panelX, py, panelW / 2 - 1, 18, Component.literal("Res"),
 			(ExportSettings.Resolution value) -> Component.literal(value.label()), settings.resolution,
 			Arrays.asList(ExportSettings.Resolution.values()), value -> settings.resolution = value));
@@ -267,7 +272,7 @@ public final class TakeEditorScreen extends Screen {
 		if (!this.hideInspector) {
 			int panelW = 176;
 			int panelX = this.width - panelW - 8;
-			graphics.fill(panelX - 4, 4, this.width - 4, 198, 0x90101216);
+			graphics.fill(panelX - 4, 4, this.width - 4, 220, 0x90101216);
 		}
 
 		// Bottom timeline bar backdrop
