@@ -64,6 +64,7 @@ public final class TakeData {
 
 	public void setRecordedDayTime(long recordedDayTime) {
 		this.recordedDayTime = recordedDayTime;
+		this.hasRecordedClock = true;
 	}
 
 	public boolean hasRecordedClock() {
