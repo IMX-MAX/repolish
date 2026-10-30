@@ -159,6 +159,10 @@ public final class CaptureController {
 		}
 
 		TakeData take = new TakeData(baseName, System.currentTimeMillis(), currentFov);
+		if (minecraft.level != null) {
+			take.setRecordedDayTime(minecraft.level.getDayTime());
+			take.setRecordedGameTime(minecraft.level.getGameTime());
+		}
 		take.setAudioFileName(audioFileName);
 		this.currentTake = take;
 		this.startedNanos = System.nanoTime();

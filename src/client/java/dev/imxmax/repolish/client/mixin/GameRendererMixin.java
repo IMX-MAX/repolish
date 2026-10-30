@@ -17,6 +17,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class GameRendererMixin {
 	@Inject(method = "render", at = @At("HEAD"))
 	private void repolish$beforeRender(DeltaTracker deltaTracker, boolean renderLevel, CallbackInfo ci) {
+		if (ReplayController.isExporting()) {
+			// Flashback-style perfect frames: pin the delta tracker to the exact
+			// 1/fps frame time so every exported frame renders at a deterministic
+			// sub-tick timestamp regardless of wall-clock hitches.
+			ReplayController.get().pinDeltaTracker(deltaTracker);
+		}
 		CaptureController.onBeforeRender(
 			((GameRenderer) (Object) this).getMinecraft(),
 			deltaTracker.getGameTimeDeltaPartialTick(true)

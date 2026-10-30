@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import net.minecraft.client.CameraType;
+import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.player.LocalPlayer;
@@ -54,6 +55,9 @@ public final class ReplayController {
 
 	// Saved player state before entering the replay editor
 	private SavedPlayerState savedPlayerState;
+	// Saved world clock so the recreation can pin the world to the recorded time
+	private long savedWorldDayTime = -1L;
+	private long savedWorldGameTime = -1L;
 
 	// Deterministic frame-by-frame export state
 	private volatile boolean exporting;
@@ -119,6 +123,8 @@ public final class ReplayController {
 		}
 		if (!this.active) {
 			this.savedPlayerState = SavedPlayerState.capture(minecraft);
+			this.savedWorldDayTime = minecraft.level.getDayTime();
+			this.savedWorldGameTime = minecraft.level.getGameTime();
 		}
 		this.take = take;
 		this.takeFile = takeFile;
@@ -172,6 +178,12 @@ public final class ReplayController {
 		if (this.savedPlayerState != null) {
 			this.savedPlayerState.restore(minecraft);
 			this.savedPlayerState = null;
+		}
+		if (minecraft.level != null && this.savedWorldDayTime >= 0L) {
+			minecraft.level.setDayTime(this.savedWorldDayTime);
+			minecraft.level.getLevelData().setGameTime(this.savedWorldGameTime);
+			this.savedWorldDayTime = -1L;
+			this.savedWorldGameTime = -1L;
 		}
 	}
 
@@ -431,6 +443,45 @@ public final class ReplayController {
 
 		this.evaluateSample();
 		this.applyToPlayer(minecraft);
+		this.applyWorldClock(minecraft);
+	}
+
+	/**
+	 * Pins the client delta tracker to the exact export frame time (the
+	 * Flashback "perfect frames" technique). Each rendered frame is therefore
+	 * interpolated at precisely frameIndex / fps seconds into the take, instead
+	 * of whatever the wall clock happened to be.
+	 */
+	public void pinDeltaTracker(DeltaTracker deltaTracker) {
+		if (!this.exporting || !(deltaTracker instanceof DeltaTracker.Timer timer)) {
+			return;
+		}
+		int fps = Math.max(1, this.exportFps);
+		float deltaTicks = 20.0F / fps;
+		float residual = (float) ((this.exportFrameIndex / (double) fps * 20.0) % 1.0);
+		timer.updateFrozenState(false);
+		timer.updatePauseState(false);
+		timer.deltaTicks = deltaTicks;
+		timer.realtimeDeltaTicks = deltaTicks;
+		timer.deltaTickResidual = residual;
+		timer.pausedDeltaTickResidual = residual;
+	}
+
+	/**
+	 * Pins the client world clock to the recorded take (Flashback-style): the
+	 * day time and game time at the current playhead are reconstructed from the
+	 * clock captured when recording started, so sky, lighting, and time-of-day
+	 * in the recreation match the original footage exactly.
+	 */
+	private void applyWorldClock(Minecraft minecraft) {
+		if (this.take == null || minecraft.level == null || !this.take.hasRecordedClock()) {
+			return;
+		}
+		double playheadTicks = this.playhead * 20.0;
+		long dayTime = this.take.recordedDayTime() + (long) Math.floor(playheadTicks);
+		long gameTime = this.take.recordedGameTime() + (long) Math.floor(playheadTicks);
+		minecraft.level.setDayTime(dayTime);
+		minecraft.level.getLevelData().setGameTime(gameTime);
 	}
 
 	public void onAfterRender(Minecraft minecraft) {

@@ -13,6 +13,7 @@ Fabric client mod for Minecraft Java Edition **1.21.11**. Repolish records first
    - Repolish reconstructs a continuous 240 Hz mouse trajectory across the whole take using a **velocity-adaptive zero-phase filter**:
      - 20 TPS staircase turns and micro-jitter are fused into smooth, natural OBS-style mouse arcs **centered on the exact tick of the turn** (never trailing behind the action like Minecraft's spectator camera).
      - Fast intentional flicks automatically tighten their filter window based on **Responsiveness**, landing crisply on target without floatiness.
+   - The recreation is **world-accurate like Flashback**: the world's day time and game time are pinned to the take's playhead (reconstructed from the clock captured at record start), so sky, lighting, and time-of-day match the original footage exactly.
    - Everything in the editor updates **live on your screen**:
      - Scrub the timeline bar, play/pause (`Space`), step single frames (`<` / `>` or `Left` / `Right`), change playback speed (`0.25x` – `2.0x`), or set **In (`[`)** and **Out (`]`)** trim points.
      - Toggle **Look: Smooth / Raw TAS (`R`)** at any moment to compare the recreated mouse movement against the raw TAS angles live.
@@ -22,7 +23,7 @@ Fabric client mod for Minecraft Java Edition **1.21.11**. Repolish records first
    - Export settings are **frozen at the moment you click Export**: the video is rendered with the smoothing, responsiveness, FOV, HUD, audio, shader pack, resolution, and FPS you configured — not whatever the live preview happens to show later. The chosen shader pack is applied for the render and your previous pack is restored afterwards, and the exported look is always the smoothed one (never raw), so laggy/shaky raw footage comes out smooth.
    - Frames stream **directly into ffmpeg while rendering** (no giant intermediate file), so the encode finishes moments after the last frame. Output is `.mp4` (`libx264 -crf 14` with trimmed speaker audio), scaled with lanczos to your **exact chosen resolution** (even above window size), or high-quality `.avi` when ffmpeg is unavailable.
    - The recreation renders with the **FOV the take was recorded with**, and the replayed player is velocity-zeroed and server-synced every frame so the footage never rubber-bands or bounces.
-   - Even with heavy shaders enabled, every frame is rendered at its exact `1 / fps` timestamp.
+   - Exported frames use **perfect deterministic timing** (Flashback-style): the client delta tracker is pinned to the exact `1 / fps` frame time, so even with heavy shaders enabled every frame is rendered at its exact timestamp with no wall-clock jitter.
 
 ## Controls
 

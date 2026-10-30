@@ -17,7 +17,7 @@ import java.util.List;
  */
 public final class TakeData {
 	private static final int MAGIC = 0x5250544B; // "RPTK"
-	private static final int VERSION = 1;
+	private static final int VERSION = 2;
 
 	public static final int FLAG_SNEAKING = 1;
 	public static final int FLAG_SPRINTING = 1 << 1;
@@ -28,6 +28,9 @@ public final class TakeData {
 	private String name;
 	private long createdAtMillis;
 	private int recordedFov;
+	private long recordedDayTime;
+	private long recordedGameTime;
+	private boolean hasRecordedClock;
 	private String audioFileName;
 	private final List<Sample> samples = new ArrayList<>();
 	private final List<Double> markers = new ArrayList<>();
@@ -54,6 +57,27 @@ public final class TakeData {
 
 	public int recordedFov() {
 		return this.recordedFov;
+	}
+
+	public long recordedDayTime() {
+		return this.recordedDayTime;
+	}
+
+	public void setRecordedDayTime(long recordedDayTime) {
+		this.recordedDayTime = recordedDayTime;
+	}
+
+	public long recordedGameTime() {
+		return this.recordedGameTime;
+	}
+
+	public void setRecordedGameTime(long recordedGameTime) {
+		this.recordedGameTime = recordedGameTime;
+		this.hasRecordedClock = true;
+	}
+
+	public boolean hasRecordedClock() {
+		return this.hasRecordedClock;
 	}
 
 	public String audioFileName() {
@@ -104,6 +128,8 @@ public final class TakeData {
 			out.writeUTF(this.name);
 			out.writeLong(this.createdAtMillis);
 			out.writeInt(this.recordedFov);
+			out.writeLong(this.recordedDayTime);
+			out.writeLong(this.recordedGameTime);
 			out.writeUTF(this.audioFileName == null ? "" : this.audioFileName);
 			out.writeInt(this.markers.size());
 			for (double marker : this.markers) {
@@ -137,14 +163,19 @@ public final class TakeData {
 				throw new IOException("Not a Repolish take file: " + file);
 			}
 			int version = in.readInt();
-			if (version != VERSION) {
+			if (version < 1 || version > VERSION) {
 				throw new IOException("Unsupported Repolish take version: " + version);
 			}
 			String name = in.readUTF();
 			long createdAt = in.readLong();
 			int fov = in.readInt();
-			String audioFile = in.readUTF();
 			TakeData take = new TakeData(name, createdAt, fov);
+			if (version >= 2) {
+				take.setRecordedDayTime(in.readLong());
+				take.setRecordedGameTime(in.readLong());
+			}
+
+			String audioFile = in.readUTF();
 			if (!audioFile.isBlank()) {
 				take.setAudioFileName(audioFile);
 			}
