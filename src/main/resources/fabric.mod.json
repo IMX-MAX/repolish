@@ -1,0 +1,36 @@
+{
+	"schemaVersion": 1,
+	"id": "repolish",
+	"version": "${version}",
+	"name": "Repolish",
+	"description": "Records TAS gameplay in-game and exports footage that looks like a normal game capture.",
+	"authors": [
+		"IMX-MAX"
+	],
+	"contact": {
+		"sources": "https://github.com/IMX-MAX/repolish"
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/repolish/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"main": [
+			"dev.imxmax.repolish.Repolish"
+		],
+		"client": [
+			"dev.imxmax.repolish.client.RepolishClient"
+		]
+	},
+	"mixins": [
+		{
+			"config": "repolish.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}
