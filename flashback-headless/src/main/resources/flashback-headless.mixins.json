@@ -1,0 +1,11 @@
+{
+	"required": true,
+	"package": "com.vibe.flashbackheadless.mixin",
+	"compatibilityLevel": "JAVA_21",
+	"client": [
+		"MixinReplayUI"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

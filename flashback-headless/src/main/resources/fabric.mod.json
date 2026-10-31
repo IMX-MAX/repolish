@@ -1,0 +1,21 @@
+{
+	"schemaVersion": 1,
+	"id": "flashback-headless",
+	"version": "1.0.0",
+	"name": "Flashback Headless",
+	"description": "Disables Flashback's ImGui overlay (init + rendering) so the game can run on arm64 without ImGui overhead, while keeping replay recording fully functional. Remove this mod (and use an x86 JVM) to edit replays.",
+	"authors": [
+		"Vibe"
+	],
+	"license": "MIT",
+	"environment": "client",
+	"mixins": [
+		"flashback-headless.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.15.10",
+		"minecraft": ">=1.21.11 <21.6",
+		"java": ">=21",
+		"flashback": ">=0.39.0"
+	}
+}
